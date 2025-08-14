@@ -66,38 +66,37 @@ int OnCalculate(const int rates_total,
    ArraySetAsSeries(low, true);
    ArraySetAsSeries(close, true);
    
-   // Smart rendering: only update when necessary
-   static datetime lastProcessedBar = 0;
-   static int lastProcessedBars = 0;
-   
    // Check if we need to update
    bool needsUpdate = false;
+   bool inTester = MQLInfoInteger(MQL_TESTER);
    
-   // First run
-   if(prev_calculated == 0)
+   // In tester or first run, always clean and redraw
+   if(prev_calculated == 0 || inTester)
    {
       DeleteAllObjects();
       needsUpdate = true;
    }
-   // New bar formed
-   else if(rates_total > lastProcessedBars)
-   {
-      // Only need to add new bar numbers, don't delete existing ones
-      needsUpdate = true;
-      lastProcessedBars = rates_total;
-   }
-   // No changes needed
+   // In live mode, optimize updates
    else
    {
-      return(rates_total);
+      static int lastProcessedBars = 0;
+      if(rates_total > lastProcessedBars)
+      {
+         needsUpdate = true;
+         lastProcessedBars = rates_total;
+      }
+      else
+      {
+         return(rates_total);
+      }
    }
    
-   // Get current time
-   datetime currentTime = TimeCurrent();
+   // Get current time from the latest bar (works in both live and tester)
+   datetime currentTime = (rates_total > 0) ? time[0] : TimeCurrent();
    MqlDateTime currentDT;
    TimeToStruct(currentTime, currentDT);
    
-   // Get today's midnight
+   // Get today's midnight based on the latest bar
    MqlDateTime todayDT = currentDT;
    todayDT.hour = 0;
    todayDT.min = 0;
@@ -108,6 +107,8 @@ int OnCalculate(const int rates_total,
    {
       Print("=== BAR COUNTER - Processing ", MaxBarsToProcess, " bars ===");
       Print("Current time: ", TimeToString(currentTime, TIME_DATE|TIME_MINUTES));
+      if(MQLInfoInteger(MQL_TESTER))
+         Print("Running in Strategy Tester mode");
    }
    
    // Count and display bars up to MaxBarsToProcess (default 500)
@@ -219,6 +220,12 @@ int OnCalculate(const int rates_total,
    if(needsUpdate)
    {
       ChartRedraw();
+      
+      // In tester visual mode, force a redraw
+      if(MQLInfoInteger(MQL_TESTER) && MQLInfoInteger(MQL_VISUAL_MODE))
+      {
+         ChartRedraw(0);
+      }
    }
    
    return(rates_total);
