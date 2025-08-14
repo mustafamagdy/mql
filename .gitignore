@@ -1,0 +1,24 @@
+# MQL5 compiled files
+*.ex5
+
+# MetaTrader temporary files
+*.log
+*.dat
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Backup files
+*.bak
+*.old
+*.orig
+
+# Cache and temporary files
+cache/
+temp/
+tmp/
