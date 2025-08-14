@@ -83,19 +83,18 @@ int OnCalculate(const int rates_total,
    
    if(EnableDebugLog && prev_calculated == 0)
    {
-      Print("=== SIMPLIFIED BAR COUNTER - TODAY ONLY ===");
+      Print("=== BAR COUNTER - Processing ", MaxBarsToProcess, " bars ===");
       Print("Current time: ", TimeToString(currentTime, TIME_DATE|TIME_MINUTES));
-      Print("Today midnight: ", TimeToString(todayMidnight, TIME_DATE|TIME_MINUTES));
    }
    
-   // Count and display bars for TODAY ONLY
-   for(int i = 0; i < rates_total; i++)
+   // Count and display bars up to MaxBarsToProcess (default 500)
+   int barsToProcess = MaxBarsToProcess;
+   if(barsToProcess <= 0 || barsToProcess > rates_total)
+      barsToProcess = rates_total;
+   
+   for(int i = 0; i < barsToProcess; i++)
    {
       datetime barTime = time[i];
-      
-      // Stop if we've gone past today
-      if(barTime < todayMidnight)
-         break;
       
       // Skip current incomplete bar
       if(i == 0)
