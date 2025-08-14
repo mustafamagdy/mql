@@ -124,7 +124,7 @@ int OnCalculate(const int rates_total,
       TimeToStruct(currentBarTime, currentBarDT);
       int currentBarNumber = currentBarDT.hour + 1;
       
-      string comment = StringFormat("Bar Counter (Tester Mode)\n");
+      string comment = "Bar Counter (Tester Mode)\n";
       comment += StringFormat("Current Bar: %s\n", TimeToString(currentBarTime, TIME_DATE|TIME_MINUTES));
       comment += StringFormat("Bar Number: #%d\n", currentBarNumber);
       comment += StringFormat("Day: %s\n", TimeToString(currentBarTime, TIME_DATE));
