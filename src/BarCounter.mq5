@@ -66,8 +66,31 @@ int OnCalculate(const int rates_total,
    ArraySetAsSeries(low, true);
    ArraySetAsSeries(close, true);
    
-   // ALWAYS clean up ALL objects to remove previous days' numbers
-   DeleteAllObjects();
+   // Smart rendering: only update when necessary
+   static datetime lastProcessedBar = 0;
+   static int lastProcessedBars = 0;
+   
+   // Check if we need to update
+   bool needsUpdate = false;
+   
+   // First run
+   if(prev_calculated == 0)
+   {
+      DeleteAllObjects();
+      needsUpdate = true;
+   }
+   // New bar formed
+   else if(rates_total > lastProcessedBars)
+   {
+      // Only need to add new bar numbers, don't delete existing ones
+      needsUpdate = true;
+      lastProcessedBars = rates_total;
+   }
+   // No changes needed
+   else
+   {
+      return(rates_total);
+   }
    
    // Get current time
    datetime currentTime = TimeCurrent();
@@ -122,12 +145,27 @@ int OnCalculate(const int rates_total,
          StringReplace(timeStr, ".", "_");
          string objName = objPrefix + timeStr;
          
-         // Delete any existing object at this position first
-         if(ObjectFind(0, objName) >= 0)
-            ObjectDelete(0, objName);
+         // Check if object already exists with correct text
+         bool objectExists = (ObjectFind(0, objName) >= 0);
+         if(objectExists)
+         {
+            // Check if it already has the correct text
+            string existingText = ObjectGetString(0, objName, OBJPROP_TEXT);
+            if(existingText == IntegerToString(barNumber))
+            {
+               // Object already exists with correct text, skip
+               continue;
+            }
+            else
+            {
+               // Wrong text, delete and recreate
+               ObjectDelete(0, objName);
+               objectExists = false;
+            }
+         }
          
-         // Create text object
-         if(ObjectCreate(0, objName, OBJ_TEXT, 0, barTime, low[i]))
+         // Create text object only if it doesn't exist
+         if(!objectExists && ObjectCreate(0, objName, OBJ_TEXT, 0, barTime, low[i]))
          {
             // Set text properties
             ObjectSetString(0, objName, OBJPROP_TEXT, IntegerToString(barNumber));
@@ -177,6 +215,12 @@ int OnCalculate(const int rates_total,
       Print("=== END ===");
    }
    
+   // Only redraw chart if we made updates
+   if(needsUpdate)
+   {
+      ChartRedraw();
+   }
+   
    return(rates_total);
 }
 
@@ -201,8 +245,10 @@ void DeleteAllObjects()
    
    if(EnableDebugLog && deleted > 0)
       Print("Deleted ", deleted, " old bar count objects");
-      
-   ChartRedraw();
+   
+   // Only redraw if we actually deleted something   
+   if(deleted > 0)
+      ChartRedraw();
 }
 
 //+------------------------------------------------------------------+
