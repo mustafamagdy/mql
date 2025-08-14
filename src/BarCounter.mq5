@@ -116,6 +116,21 @@ int OnCalculate(const int rates_total,
    if(barsToProcess <= 0 || barsToProcess > rates_total)
       barsToProcess = rates_total;
    
+   // In tester mode, show current bar info in comment
+   if(inTester && rates_total > 1)
+   {
+      datetime currentBarTime = time[1]; // Use index 1 (last closed bar)
+      MqlDateTime currentBarDT;
+      TimeToStruct(currentBarTime, currentBarDT);
+      int currentBarNumber = currentBarDT.hour + 1;
+      
+      string comment = StringFormat("Bar Counter (Tester Mode)\n");
+      comment += StringFormat("Current Bar: %s\n", TimeToString(currentBarTime, TIME_DATE|TIME_MINUTES));
+      comment += StringFormat("Bar Number: #%d\n", currentBarNumber);
+      comment += StringFormat("Day: %s\n", TimeToString(currentBarTime, TIME_DATE));
+      Comment(comment);
+   }
+   
    for(int i = 0; i < barsToProcess; i++)
    {
       datetime barTime = time[i];
@@ -130,6 +145,12 @@ int OnCalculate(const int rates_total,
       // Calculate bar number: hour + 1 (00:00 = 1, 01:00 = 2, etc.)
       int barNumber = barDT.hour + 1;
       
+      // In tester mode, print bar info for key bars (00:00 and every 6 hours)
+      if(inTester && (barDT.hour == 0 || barDT.hour % 6 == 0))
+      {
+         Print("Bar at ", TimeToString(barTime, TIME_DATE|TIME_MINUTES), " = Bar #", barNumber);
+      }
+      
       if(EnableDebugLog && i < 30)
       {
          Print("Index [", i, "] = ", TimeToString(barTime, TIME_DATE|TIME_MINUTES), 
@@ -137,7 +158,8 @@ int OnCalculate(const int rates_total,
       }
       
       // Display count if this bar meets the display interval criteria
-      if(barNumber % DisplayInterval == 0 || barNumber == 1)
+      // Skip object creation in tester mode as it's unreliable
+      if(!inTester && (barNumber % DisplayInterval == 0 || barNumber == 1))
       {
          // Create text object name
          string timeStr = TimeToString(barTime, TIME_DATE|TIME_MINUTES);
