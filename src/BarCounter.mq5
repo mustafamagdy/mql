@@ -164,8 +164,7 @@ int OnCalculate(const int rates_total,
       }
       
       // Display count if this bar meets the display interval criteria
-      // Skip object creation in tester mode as it's unreliable
-      if(!inTester && (barNumber % DisplayInterval == 0 || barNumber == 1))
+      if(barNumber % DisplayInterval == 0 || barNumber == 1)
       {
          // Create text object name
          string timeStr = TimeToString(barTime, TIME_DATE|TIME_MINUTES);
@@ -194,23 +193,38 @@ int OnCalculate(const int rates_total,
          }
          
          // Create text object only if it doesn't exist
-         if(!objectExists && ObjectCreate(0, objName, OBJ_TEXT, 0, barTime, low[i]))
+         // Use explicit chart ID 0 for main chart
+         long chartID = 0;
+         if(!objectExists)
          {
-            // Set text properties
-            ObjectSetString(0, objName, OBJPROP_TEXT, IntegerToString(barNumber));
-            ObjectSetInteger(0, objName, OBJPROP_COLOR, TextColor);
-            ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, TextSize);
-            ObjectSetString(0, objName, OBJPROP_FONT, FontName);
-            ObjectSetInteger(0, objName, OBJPROP_ANCHOR, ANCHOR_CENTER);
+            // Create the object on the main chart window
+            if(!ObjectCreate(chartID, objName, OBJ_TEXT, 0, barTime, low[i]))
+            {
+               // If creation failed, try to delete first then recreate
+               ObjectDelete(chartID, objName);
+               if(!ObjectCreate(chartID, objName, OBJ_TEXT, 0, barTime, low[i]))
+               {
+                  if(EnableDebugLog)
+                     Print("Failed to create object: ", objName, " Error: ", GetLastError());
+                  continue;
+               }
+            }
+            
+            // Set text properties using explicit chart ID
+            ObjectSetString(chartID, objName, OBJPROP_TEXT, IntegerToString(barNumber));
+            ObjectSetInteger(chartID, objName, OBJPROP_COLOR, TextColor);
+            ObjectSetInteger(chartID, objName, OBJPROP_FONTSIZE, TextSize);
+            ObjectSetString(chartID, objName, OBJPROP_FONT, FontName);
+            ObjectSetInteger(chartID, objName, OBJPROP_ANCHOR, ANCHOR_CENTER);
             
             // Set text rotation if vertical text is enabled
             if(VerticalText)
             {
-               ObjectSetDouble(0, objName, OBJPROP_ANGLE, 90.0);
+               ObjectSetDouble(chartID, objName, OBJPROP_ANGLE, 90.0);
             }
             else
             {
-               ObjectSetDouble(0, objName, OBJPROP_ANGLE, 0.0);
+               ObjectSetDouble(chartID, objName, OBJPROP_ANGLE, 0.0);
             }
             
             // Calculate offset
@@ -233,8 +247,13 @@ int OnCalculate(const int rates_total,
             // Position text below the bar - USE EXACT BAR TIME
             double textPrice = low[i] - offset;
             
-            ObjectSetInteger(0, objName, OBJPROP_TIME, barTime);
-            ObjectSetDouble(0, objName, OBJPROP_PRICE, textPrice);
+            ObjectSetInteger(chartID, objName, OBJPROP_TIME, barTime);
+            ObjectSetDouble(chartID, objName, OBJPROP_PRICE, textPrice);
+            
+            // Make object visible in background
+            ObjectSetInteger(chartID, objName, OBJPROP_BACK, false);
+            ObjectSetInteger(chartID, objName, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(chartID, objName, OBJPROP_SELECTED, false);
          }
       }
    }
@@ -244,16 +263,10 @@ int OnCalculate(const int rates_total,
       Print("=== END ===");
    }
    
-   // Only redraw chart if we made updates
-   if(needsUpdate)
+   // Always force redraw in tester mode or when we made updates
+   if(needsUpdate || inTester)
    {
-      ChartRedraw();
-      
-      // In tester visual mode, force a redraw
-      if(MQLInfoInteger(MQL_TESTER) && MQLInfoInteger(MQL_VISUAL_MODE))
-      {
-         ChartRedraw(0);
-      }
+      ChartRedraw(0);
    }
    
    return(rates_total);
