@@ -29,7 +29,8 @@ The Bar Counter indicator is a custom MQL5 indicator that counts bars on your ch
 |-----------|------|---------|-------------|
 | **DisplayInterval** | Integer | 1 | Display count every X bars (1 = every bar, 5 = every 5th bar, etc.) |
 | **TextColor** | Color | White | Color of the bar count text |
-| **TextSize** | Integer | 10 | Font size for the bar count display |
+| **TextSize** | Integer | 10 | Font size (6=tiny, 8=small, 10=medium, 12=large, 14+=extra large) |
+| **FontName** | String | Arial | Font family (Arial, Verdana, Times New Roman, Courier New, etc.) |
 | **TextOffset** | Integer | 5 | Vertical distance below bars (in ticks, use 0 for auto) |
 | **VerticalText** | Boolean | true | Display text vertically (90 degrees rotation) |
 | **MaxBarsToProcess** | Integer | 500 | Maximum bars to process (0 = all bars, recommended 200-500 for M1) |

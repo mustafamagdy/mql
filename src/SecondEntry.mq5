@@ -82,6 +82,15 @@ input color    InpTPColor             = clrLimeGreen;   // Take Profit Line Colo
 input int      InpPanelX              = 10;             // Stats Panel X Position
 input int      InpPanelY              = 30;             // Stats Panel Y Position
 
+//--- Al Brooks Quality Filters
+input bool     InpUseTrendBarFilter   = true;           // Require Trend Bar (not doji)
+input double   InpMinTrendBarRatio    = 0.6;            // Min Body/Range Ratio for Trend Bar
+input bool     InpRequireEMAPosition  = true;           // Signal Bar Must Close Proper Side of EMA
+input bool     InpRequireStrongClose  = true;           // Require Close in Top/Bottom Third
+input int      InpMinConsecutiveBars  = 2;              // Min Consecutive Trend Bars Before Signal
+input bool     InpWithTrendOnly       = true;           // Only Take With-Trend Entries
+input double   InpMinBarSizeForSignal = 0.8;            // Min Bar Size (ATR) for Valid Signal
+
 //--- Indicator buffers
 double H1Buffer[];
 double H2Buffer[];
@@ -315,6 +324,100 @@ bool IsSwingLow(const double &low[], int index)
 }
 
 //+------------------------------------------------------------------+
+//| Check if bar is a trend bar (not doji)                         |
+//+------------------------------------------------------------------+
+bool IsTrendBar(double open, double high, double low, double close, double atr)
+{
+   if(!InpUseTrendBarFilter)
+      return true;
+      
+   double range = high - low;
+   double body = MathAbs(close - open);
+   
+   // Check minimum bar size
+   if(range < atr * InpMinBarSizeForSignal)
+      return false;
+   
+   // Check body to range ratio
+   if(range > 0 && body / range < InpMinTrendBarRatio)
+      return false;
+      
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Check if bar closes in strong position                         |
+//+------------------------------------------------------------------+
+bool HasStrongClose(double open, double high, double low, double close, bool isLong)
+{
+   if(!InpRequireStrongClose)
+      return true;
+      
+   double range = high - low;
+   if(range == 0)
+      return false;
+      
+   if(isLong)
+   {
+      // For long signals, close should be in top third
+      return (close > low + range * 0.67);
+   }
+   else
+   {
+      // For short signals, close should be in bottom third
+      return (close < high - range * 0.67);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Check EMA position requirement                                  |
+//+------------------------------------------------------------------+
+bool CheckEMAPosition(double close, double ema, bool isLong)
+{
+   if(!InpRequireEMAPosition)
+      return true;
+      
+   if(isLong)
+   {
+      // For long signals, bar should close above EMA
+      return close > ema;
+   }
+   else
+   {
+      // For short signals, bar should close below EMA
+      return close < ema;
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Count consecutive trend bars                                    |
+//+------------------------------------------------------------------+
+int CountConsecutiveTrendBars(const double &open[], const double &high[], 
+                             const double &low[], const double &close[], 
+                             int startIndex, bool isLong, int maxBars)
+{
+   int count = 0;
+   
+   for(int i = startIndex; i >= 0 && count < maxBars; i--)
+   {
+      if(i >= ArraySize(open))
+         break;
+         
+      bool isBullBar = close[i] > open[i];
+      bool isBearBar = close[i] < open[i];
+      
+      if(isLong && !isBullBar)
+         break;
+      if(!isLong && !isBearBar)
+         break;
+         
+      count++;
+   }
+   
+   return count;
+}
+
+//+------------------------------------------------------------------+
 //| Send alert notification                                         |
 //+------------------------------------------------------------------+
 void SendSignalAlert(string signalType, int barIndex)
@@ -384,41 +487,67 @@ double CalculateSmartTP(bool isLong, double entryPrice, double stopLoss,
 //+------------------------------------------------------------------+
 void DrawSLTPLines(datetime time1, datetime time2, double sl, double tp, bool isLong)
 {
-   // Remove old lines if they exist
-   if(currentSLLine != "")
-      ObjectDelete(0, currentSLLine);
-   if(currentTPLine != "")
-      ObjectDelete(0, currentTPLine);
+   // Only remove old lines when a new signal appears or trade is closed
+   // Lines persist until hit or new signal
    
    // Create unique names for lines
-   currentSLLine = panelPrefix + "SL_" + TimeToString(time1);
-   currentTPLine = panelPrefix + "TP_" + TimeToString(time1);
+   string newSLLine = panelPrefix + "SL_" + TimeToString(time1);
+   string newTPLine = panelPrefix + "TP_" + TimeToString(time1);
    
-   // Draw SL line
-   ObjectCreate(0, currentSLLine, OBJ_TREND, 0, time1, sl, time2, sl);
+   // Check if we're creating new lines (new signal)
+   if(newSLLine != currentSLLine && currentSLLine != "")
+   {
+      // Remove old lines only when new signal appears
+      ObjectDelete(0, currentSLLine);
+      ObjectDelete(0, currentTPLine);
+      ObjectDelete(0, StringSubstr(currentSLLine, 0, StringLen(currentSLLine)) + "_Label");
+      ObjectDelete(0, StringSubstr(currentTPLine, 0, StringLen(currentTPLine)) + "_Label");
+   }
+   
+   currentSLLine = newSLLine;
+   currentTPLine = newTPLine;
+   
+   // Draw SL line (horizontal line that extends indefinitely)
+   ObjectCreate(0, currentSLLine, OBJ_HLINE, 0, 0, sl);
    ObjectSetInteger(0, currentSLLine, OBJPROP_COLOR, InpSLColor);
    ObjectSetInteger(0, currentSLLine, OBJPROP_WIDTH, 2);
    ObjectSetInteger(0, currentSLLine, OBJPROP_STYLE, STYLE_DASH);
-   ObjectSetInteger(0, currentSLLine, OBJPROP_RAY_RIGHT, true);
    
-   // Draw TP line
-   ObjectCreate(0, currentTPLine, OBJ_TREND, 0, time1, tp, time2, tp);
+   // Draw TP line (horizontal line that extends indefinitely)
+   ObjectCreate(0, currentTPLine, OBJ_HLINE, 0, 0, tp);
    ObjectSetInteger(0, currentTPLine, OBJPROP_COLOR, InpTPColor);
    ObjectSetInteger(0, currentTPLine, OBJPROP_WIDTH, 2);
    ObjectSetInteger(0, currentTPLine, OBJPROP_STYLE, STYLE_DASH);
-   ObjectSetInteger(0, currentTPLine, OBJPROP_RAY_RIGHT, true);
    
    // Add text labels
-   string slLabel = panelPrefix + "SL_Label_" + TimeToString(time1);
-   string tpLabel = panelPrefix + "TP_Label_" + TimeToString(time1);
+   string slLabel = currentSLLine + "_Label";
+   string tpLabel = currentTPLine + "_Label";
    
    ObjectCreate(0, slLabel, OBJ_TEXT, 0, time2, sl);
    ObjectSetString(0, slLabel, OBJPROP_TEXT, StringFormat("SL: %.5f", sl));
    ObjectSetInteger(0, slLabel, OBJPROP_COLOR, InpSLColor);
+   ObjectSetInteger(0, slLabel, OBJPROP_ANCHOR, ANCHOR_LEFT);
    
    ObjectCreate(0, tpLabel, OBJ_TEXT, 0, time2, tp);
    ObjectSetString(0, tpLabel, OBJPROP_TEXT, StringFormat("TP: %.5f (%.1fR)", tp, InpMinRiskReward));
    ObjectSetInteger(0, tpLabel, OBJPROP_COLOR, InpTPColor);
+   ObjectSetInteger(0, tpLabel, OBJPROP_ANCHOR, ANCHOR_LEFT);
+}
+
+//+------------------------------------------------------------------+
+//| Remove SL/TP lines when trade closes                            |
+//+------------------------------------------------------------------+
+void RemoveSLTPLines()
+{
+   if(currentSLLine != "")
+   {
+      ObjectDelete(0, currentSLLine);
+      ObjectDelete(0, currentTPLine);
+      ObjectDelete(0, currentSLLine + "_Label");
+      ObjectDelete(0, currentTPLine + "_Label");
+      currentSLLine = "";
+      currentTPLine = "";
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -472,6 +601,9 @@ void CheckTradeOutcome(int currentBar, const double &high[], const double &low[]
       
       totalTrades++;
       totalRMultiple += trades[idx].result;
+      
+      // Remove SL/TP lines when trade closes
+      RemoveSLTPLines();
       
       // Clear current trade
       currentEntryPrice = 0;
@@ -838,9 +970,41 @@ int OnCalculate(const int rates_total,
             else if(legCount == 2)
             {
                bool strongSignal = true;
+               
+               // Al Brooks quality filters
+               bool passesFilters = true;
+               
+               // 1. Check if signal bar is a trend bar
+               if(!IsTrendBar(open[i], high[i], low[i], close[i], ATRBuffer[i]))
+                  passesFilters = false;
+               
+               // 2. Check strong close position
+               if(!HasStrongClose(open[i], high[i], low[i], close[i], true))
+                  passesFilters = false;
+               
+               // 3. Check EMA position
+               if(!CheckEMAPosition(close[i], PrimaryEMABuffer[i], true))
+                  passesFilters = false;
+               
+               // 4. Check consecutive trend bars before signal
+               if(i > 0)
+               {
+                  int consecBars = CountConsecutiveTrendBars(open, high, low, close, i-1, true, 5);
+                  if(consecBars < InpMinConsecutiveBars)
+                     passesFilters = false;
+               }
+               
+               // 5. With-trend only filter
+               if(InpWithTrendOnly)
+               {
+                  // For longs, we want overall uptrend (higher highs)
+                  if(i > 20 && high[i] < high[ArrayMaximum(high, i-20, 20)])
+                     passesFilters = false;
+               }
+               
                if(InpStrongSignalsOnly)
                {
-                  // Check for strong signal criteria
+                  // Original strong signal criteria
                   double range = high[i] - low[i];
                   bool isBullish = close[i] > open[i];
                   bool closesHigh = close[i] > (high[i] - range * 0.3);
@@ -848,7 +1012,7 @@ int OnCalculate(const int rates_total,
                   strongSignal = isBullish && closesHigh && higherClose;
                }
                
-               if(InpShowH2 && waitForLegCompletion && strongSignal)
+               if(InpShowH2 && waitForLegCompletion && strongSignal && passesFilters)
                {
                   H2Buffer[i] = low[i];
                   SendSignalAlert("H2", i);

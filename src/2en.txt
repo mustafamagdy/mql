@@ -1,0 +1,322 @@
+//@version=6
+// Al Brooks Second Entry Indicator
+// Author: [PriceActionTrader1]
+// Description:
+//   This script helps in visually detectiong Al Brooks Second Entry pattern.
+//   It includes improved leg tracking, confirmed swing highs/lows, optional swing markers,
+//   enhanced pullback zone management, and a debug mode.
+//
+// === 🔄 Update Summary ===
+// 1. 📈 Smarter Trend Detection:
+//    - Replaced basic bar comparison with confirmed swing high/low logic.
+//    - New option to visualize swing points.
+//    - New option to display only strong signals(H1/H2, L1/L2).
+//
+// 2. 🧠 Improved Leg Tracking:
+//    - Uses `waitForLegCompletion` to prevent premature signal triggering.
+//    - Resets on trend reversals.
+//
+// 3. 📦 Pullback Zones:
+//    - More reliable and responsive to trend legs.
+//    - Zones automatically clear on H2/L2 or trend change.
+//
+// 4. 🧪 Debug Mode:
+//    - Toggle to view leg count and trend bias live on the chart.
+//
+// 5. 🎨 Clean Visual Enhancements:
+//    - Swing markers, clear label sizing, and better zone rendering.
+//
+// 6. 🔔 Alerts:
+//    - Users can now create alerts for key signal events (H1, H2, L1, L2, Swing High, Swing Low, New High(in bull bias), New Low(in bear bias))
+//
+// 7. 📊 Intraday Bar Counter:
+//    - Added bar counter that shows bar number below every other bar
+//    - Counter automatically resets at the start of each new trading day
+//
+// Enjoy clearer setups and cleaner charts. Feedback welcome!
+
+indicator('Al Brooks Second Entry', overlay=true, max_labels_count = 500)
+
+// === INPUTS ===
+showH1 = input(true, 'Show First Entry Long (H1)')
+showL1 = input(true, 'Show First Entry Short (L1)')
+showH2 = input(true, 'Show Second Entry Long (H2)')
+showL2 = input(true, 'Show Second Entry Short (L2)')
+showStrongSignalsOnly = input.bool(false, "Show Strong Signals Only", tooltip = "For 2nd Entries, Current candle should close higher or lower w.r.t previous candle close and the candle should be bullish or bearish respectively and must close in the top or bottom 30% of the candle's range.")
+waitForCandleClose = input.bool(true,"Wait for candle to close?",tooltip = "If selected, It will only show signals once the candle closes. Otherwise, signals will be shown on every tick.")
+primaryEmaLength = input.int(50, 'Primary EMA Length', tooltip = "This EMA is used for bias determination.")
+showSecondaryEma = input(false, "Show Secondary EMA")
+secondaryEmaLength = input.int(21, 'Secondary EMA Length', tooltip = "This is just an additional EMA to be displayed on the chart. Not used for any calculations.")
+labelSizeStr = input.string('tiny', 'Label Size', options=['tiny', 'small'])
+highLowDisplay = input.string('off', 'High/Low Display', options=['off','newest', 'swing'], tooltip = 'Newest will show highest high in bull bias(close above primary EMA) and lowest low in bear bias(close below primary EMA). Swing will show swing high and swing low w.r.t past 2 candles.')
+showZones = input(false, "Highlight Pullback Zones")
+debugMode = input(false, "Debug Mode")
+// Bar Counter Settings
+showBarCounter = input(false, "Show Bar Counter", group="Bar Counter")
+barCounterLabelSize = input.string('normal', 'Bar Counter Size', options=['tiny', 'small', 'normal'], group="Bar Counter")
+barCounterTextColor = input.color(color.new(color.gray,25), "Bar Counter Text Color", group="Bar Counter")
+
+
+// === CALCULATIONS ===
+atr = ta.atr(14)
+primaryEma = ta.ema(close, primaryEmaLength)
+secondaryEma = ta.ema(close, secondaryEmaLength)
+bullBias = close > primaryEma
+bearBias = close < primaryEma
+
+// === TREND TRACKING ===
+var float highestHigh = na
+var float lowestLow = na
+var float legStart = na
+var float legExtreme = na
+var int legCount = 0
+var int legDir = 0 // 1 = up, -1 = down, 0 = none
+var int lastLegBar = na
+var bool waitForLegCompletion = false
+var bool newHighDetected = false
+var bool newLowDetected = false
+
+// === Pullback box ===
+var box pullbackBox = na
+
+// === Label triggers ===
+var bool h1 = false
+var bool h2 = false
+var bool l1 = false
+var bool l2 = false
+
+// === Intraday Bar Counter ===
+var int barCount = 0
+var int lastDay = 0
+currentDay = dayofmonth
+
+// Reset bar count on new day
+if currentDay != lastDay
+    barCount := 0
+    lastDay := currentDay
+
+// Increment bar count
+barCount := barCount + 1
+
+// === Swing Detection ===
+swingHiConfirmed = (waitForCandleClose?barstate.isconfirmed:true) and high[1] > high[2] and high[1] > high
+swingLoConfirmed = (waitForCandleClose?barstate.isconfirmed:true) and low[1] < low[2] and low[1] < low
+
+if (waitForCandleClose?barstate.isconfirmed:true)
+    // Reset signal triggers
+    h1 := false
+    h2 := false
+    l1 := false
+    l2 := false
+
+    // Track highest high and lowest low within current bias
+    if bullBias
+        if na(highestHigh) or high > highestHigh
+            highestHigh := high
+            newHighDetected := true
+        else
+            newHighDetected := false
+
+    if bearBias
+        if na(lowestLow) or low < lowestLow
+            lowestLow := low
+            newLowDetected := true
+        else
+            newLowDetected := false
+
+    // Clear bias-specific variables when bias changes
+    biasChanged = (bullBias and not bullBias[1]) or (bearBias and not bearBias[1])
+    if biasChanged
+        legCount := 0
+        legDir := 0
+        legStart := na
+        legExtreme := na
+        lastLegBar := na
+        waitForLegCompletion := false
+        newHighDetected := false
+        newLowDetected := false
+    
+        // Reset the trend-specific trackers
+        if bullBias
+            highestHigh := high
+            lowestLow := na
+        else
+            lowestLow := low
+            highestHigh := na
+    
+        // Clean up any visualization
+        if not na(pullbackBox)
+            box.delete(pullbackBox)
+            pullbackBox := na
+
+    // === BULL TREND LOGIC ===
+    if bullBias
+        // Check if we broke to a new high - reset pullback tracking (requirement #1)
+        if newHighDetected
+            legCount := 0
+            legDir := 0
+            legStart := na
+            legExtreme := na
+            waitForLegCompletion := false
+            
+            if not na(pullbackBox)
+                box.delete(pullbackBox)
+                pullbackBox := na
+    
+        // Track pullback (downleg)
+        if high < high[1] and low < low[1]  // Downward movement
+            if legDir != -1  // Starting a new leg down
+                legCount := legCount == 0 ? 1 : 2
+                legDir := -1
+                legStart := high[1]
+                legExtreme := low
+                waitForLegCompletion := true
+                
+                // Draw pullback zone when leg starts
+                if showZones and na(pullbackBox)
+                    pullbackBox := box.new(left=bar_index, right=bar_index + 10, top=legStart, bottom=legExtreme, bgcolor=color.new(color.gray, 85), border_color=color.gray, extend=extend.right)
+            else
+                // Continue existing downleg
+                legExtreme := math.min(nz(legExtreme, low), low)
+                
+                // Update pullback zone
+                if showZones and not na(pullbackBox)
+                    box.set_right(pullbackBox, bar_index)
+                    box.set_bottom(pullbackBox, legExtreme)
+            
+            lastLegBar := bar_index
+        
+        // Check for end of downleg and potential H1/H2 signals
+        if legDir == -1 and high > high[1]
+            // Generate H1/H2 signals
+            if legCount == 1
+                h1 := showH1 and waitForLegCompletion
+                legDir := 0  // Reset direction so we can detect next leg
+            else if legCount == 2
+                h2 := showH2 and waitForLegCompletion and (showStrongSignalsOnly? close > close[1] and close > open and close > (high - ((high - low) * (1 - 0.7))): true) // Only trigger H2 on bullish candles if showStrongSignalsOnly is enabled
+                // Reset after H2
+                //legCount := 0
+                //legDir := 0
+                
+                if not na(pullbackBox)
+                    box.delete(pullbackBox)
+                    pullbackBox := na
+            
+            waitForLegCompletion := false
+
+    // === BEAR TREND LOGIC ===
+    if bearBias
+        // Check if we broke to a new low - reset pullback tracking
+        if newLowDetected
+            legCount := 0
+            legDir := 0
+            legStart := na
+            legExtreme := na
+            waitForLegCompletion := false
+            
+            if not na(pullbackBox)
+                box.delete(pullbackBox)
+                pullbackBox := na
+        
+        // Track pullback (upleg)
+        if low > low[1] and high > high[1]  // Upward movement
+            if legDir != 1  // Starting a new leg up
+                legCount := legCount == 0 ? 1 : 2
+                legDir := 1
+                legStart := low[1]
+                legExtreme := high
+                waitForLegCompletion := true
+                
+                // Draw pullback zone when leg starts
+                if showZones and na(pullbackBox)
+                    pullbackBox := box.new(left=bar_index, right=bar_index + 10, top=legExtreme, bottom=legStart, bgcolor=color.new(color.gray, 85), border_color=color.gray, extend=extend.right)
+            else
+                // Continue existing upleg
+                legExtreme := math.max(nz(legExtreme, high), high)
+                
+                // Update pullback zone
+                if showZones and not na(pullbackBox)
+                    box.set_right(pullbackBox, bar_index)
+                    box.set_top(pullbackBox, legExtreme)
+            
+            lastLegBar := bar_index
+        
+        // Check for end of upleg and potential L1/L2 signals
+        if legDir == 1 and low < low[1]
+            // Generate L1/L2 signals
+            if legCount == 1
+                l1 := showL1 and waitForLegCompletion
+                legDir := 0  // Reset direction so we can detect next leg
+            else if legCount == 2
+                l2 := showL2 and waitForLegCompletion and (showStrongSignalsOnly? close < close[1] and close < open and close < (low + ((high - low) * (1 - 0.7))): true)  // Only trigger L2 on bearish candles if showStrongSignalsOnly is enabled
+                // Reset after L2
+                //legCount := 0
+                //legDir := 0
+                
+                if not na(pullbackBox)
+                    box.delete(pullbackBox)
+                    pullbackBox := na
+                    
+            waitForLegCompletion := false
+
+// === PLOTS ===
+plotshape((waitForCandleClose?barstate.isconfirmed:true) and h1 and labelSizeStr == 'tiny', location=location.belowbar, color=color.aqua, style=shape.labelup, text='H1', size=size.tiny, title="H1 Tiny")
+plotshape((waitForCandleClose?barstate.isconfirmed:true) and h1 and labelSizeStr == 'small', location=location.belowbar, color=color.aqua, style=shape.labelup, text='H1', size=size.small, title="H1 Small")
+
+plotshape((waitForCandleClose?barstate.isconfirmed:true) and h2 and labelSizeStr == 'tiny', location=location.belowbar, color=color.green, style=shape.labelup, text='H2', size=size.tiny, title="H2 Tiny")
+plotshape((waitForCandleClose?barstate.isconfirmed:true) and h2 and labelSizeStr == 'small', location=location.belowbar, color=color.green, style=shape.labelup, text='H2', size=size.small, title="H2 Small")
+
+plotshape((waitForCandleClose?barstate.isconfirmed:true) and l1 and labelSizeStr == 'tiny', location=location.abovebar, color=color.orange, style=shape.labeldown, text='L1', size=size.tiny, title="L1 Tiny")
+plotshape((waitForCandleClose?barstate.isconfirmed:true) and l1 and labelSizeStr == 'small', location=location.abovebar, color=color.orange, style=shape.labeldown, text='L1', size=size.small, title="L1 Small")
+
+plotshape((waitForCandleClose?barstate.isconfirmed:true) and l2 and labelSizeStr == 'tiny', location=location.abovebar, color=color.red, style=shape.labeldown, text='L2', size=size.tiny, title="L2 Small")
+plotshape((waitForCandleClose?barstate.isconfirmed:true) and l2 and labelSizeStr == 'small', location=location.abovebar, color=color.red, style=shape.labeldown, text='L2', size=size.small, title="L2 Small")
+
+// === Swing High/Low Visualization ===
+plotshape(highLowDisplay == 'swing' and swingHiConfirmed, location=location.abovebar, style=shape.triangleup, color=color.lime, size=size.tiny, title="Swing High", offset = -1)
+plotshape(highLowDisplay == 'swing' and swingLoConfirmed, location=location.belowbar, style=shape.triangledown, color=color.fuchsia, size=size.tiny, title="Swing Low", offset = -1)
+
+// === New High(in bull bias)/Low(in bear bias) Visualization ===
+plotshape((waitForCandleClose?barstate.isconfirmed:true) and highLowDisplay == 'newest' and newHighDetected, location=location.abovebar, style=shape.triangleup, color=color.olive, size=size.tiny, title="New High", offset = 0)
+plotshape((waitForCandleClose?barstate.isconfirmed:true) and highLowDisplay == 'newest' and newLowDetected, location=location.belowbar, style=shape.triangledown, color=color.purple, size=size.tiny, title="New Low", offset = 0)
+
+// Display bar counter on every other bar using label arrays
+var label[] barCounterLabels = array.new_label(0)
+
+// Cleanup old labels when day changes or chart reloads
+if array.size(barCounterLabels) > 0 and (currentDay != lastDay or barstate.isfirst)
+    for i = 0 to array.size(barCounterLabels) - 1
+        label.delete(array.get(barCounterLabels, i))
+    array.clear(barCounterLabels)
+
+// Create bar counter labels
+if showBarCounter and barCount % 2 == 0
+    barSize = barCounterLabelSize == 'tiny' ? size.tiny : (barCounterLabelSize == 'small' ? size.small : size.normal)
+    newLabel = label.new(bar_index, low - atr * 1,
+                 text=str.tostring(barCount), 
+                 textcolor=barCounterTextColor,
+                 style=label.style_none, 
+                 size=barSize)
+    array.push(barCounterLabels, newLabel)
+
+
+
+plot(primaryEma, title='Primary EMA', color=color.orange)
+plot(showSecondaryEma ? secondaryEma : na, title='Secondary EMA', color=color.silver)
+
+// === ALERT CONDITIONS ===
+alertcondition(barstate.isconfirmed and h1, title="H1 Trigger", message="H1 (First Entry Long) triggered")
+alertcondition(barstate.isconfirmed and h2, title="H2 Trigger", message="H2 (Second Entry Long) triggered")
+alertcondition(barstate.isconfirmed and l1, title="L1 Trigger", message="L1 (First Entry Short) triggered")
+alertcondition(barstate.isconfirmed and l2, title="L2 Trigger", message="L2 (Second Entry Short) triggered")
+alertcondition(swingHiConfirmed, title="Swing High", message="Swing High detected")
+alertcondition(swingLoConfirmed, title="Swing Low", message="Swing Low detected")
+alertcondition(barstate.isconfirmed and newHighDetected, title="New High(in bull bias)", message="New High detected")
+alertcondition(barstate.isconfirmed and newLowDetected, title="New Low(in bear bias)", message="New Low detected")
+
+// Debug Labels
+var label debugLabel = na
+if barstate.islast and (waitForCandleClose?barstate.isconfirmed:true) and debugMode
+    if not na(debugLabel)
+        label.delete(debugLabel)
+    debugLabel := label.new(bar_index, high + atr * 1, text = bullBias ? "BULL BIAS\nLeg: " + str.tostring(legCount) + "\nDir: " + str.tostring(legDir) + "\nNew High: " + str.tostring(newHighDetected) + "\nWait for leg completion: " + str.tostring(waitForLegCompletion): "BEAR BIAS\nLeg: " + str.tostring(legCount) + "\nDir: " + str.tostring(legDir) + "\nNew Low: " + str.tostring(newLowDetected) + "\nWait for leg completion: " + str.tostring(waitForLegCompletion), color = bullBias ? color.green : color.red, textcolor = color.white)
