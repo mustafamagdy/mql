@@ -184,8 +184,12 @@ int OnCalculate(const int rates_total,
    ArraySetAsSeries(tick_volume, true);
    ArraySetAsSeries(volume, true);
    
-   // Reset levels completely every time to ensure we catch everything
-   levelCount = 0;
+   // DON'T reset levels - we want to keep them persistent!
+   // Only reset on first run or when explicitly needed
+   if(prev_calculated == 0)
+   {
+      levelCount = 0;
+   }
    
    // Get current price for reference
    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
