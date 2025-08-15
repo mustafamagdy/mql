@@ -5,14 +5,10 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2025"
 #property link      ""
-#property version   "2.00"
+#property version   "2.40"
 #property indicator_chart_window
-#property indicator_buffers 1
-#property indicator_plots 1
-
-// Plot for average bar range
-#property indicator_label1  "AvgRange"
-#property indicator_type1   DRAW_NONE
+#property indicator_buffers 0
+#property indicator_plots 0
 
 // Font size enumeration
 enum ENUM_FONT_SIZE
@@ -31,7 +27,7 @@ input color TextColor = clrRed;               // Text color for bar count
 input ENUM_FONT_SIZE FontSizeOption = FONT_MEDIUM; // Font size option
 input int CustomFontSize = 10;                // Custom font size (used when Custom is selected)
 input string FontName = "Arial";              // Font name
-input int TextOffset = 5;                     // Vertical offset (in ticks, 0=auto)
+input int TextOffset = 0;                     // Vertical offset (in ticks, 0=auto)
 input bool VerticalText = true;               // Display text vertically (90 degrees rotation)
 input int MaxBarsToProcess = 500;             // Maximum bars to process (0 = all bars)
 
@@ -39,27 +35,12 @@ input int MaxBarsToProcess = 500;             // Maximum bars to process (0 = al
 input group "Enhanced Features"
 input bool ShowTimeUntilNextBar = true;       // Show time remaining for current bar
 input color TimeRemainingColor = clrYellow;   // Color for time remaining display
-input bool ShowAverageRange = true;           // Show average bar range
-input int AvgRangePeriod = 20;                // Period for average range calculation
-input color AvgRangeColor = clrAqua;          // Color for average range display
-
-// Input parameters - Bar Range Highlighting
-input group "Bar Range Highlighting"
-input bool EnableBackgroundHighlight = true;   // Enable background highlighting for bar ranges
-input int HighlightStart = 5;                 // Start highlighting from bar X
-input int HighlightEnd = 15;                  // End highlighting at bar X
-input color HighlightColor = clrGold;         // Bar range highlight color
-input int HighlightAlpha = 20;                // Bar range transparency (0-255)
 
 // Input parameters - Milestone Markers
 input group "Milestone Settings"
 input bool EnableMilestones = true;           // Enable milestone markers
-input int Milestone1 = 5;                     // First milestone
-input int Milestone2 = 10;                    // Second milestone
-input int Milestone3 = 25;                    // Third milestone
-input color MilestoneColor1 = clrLime;        // Milestone 1 color
-input color MilestoneColor2 = clrGold;        // Milestone 2 color
-input color MilestoneColor3 = clrMagenta;     // Milestone 3 color
+input int MilestoneInterval = 5;              // Highlight every X bars (e.g., 5 = every 5th bar)
+input color MilestoneColor = clrLime;         // Milestone color
 input int MilestoneSize = 14;                 // Milestone text size
 
 // Input parameters - Weekend Handling
@@ -70,7 +51,6 @@ input color WeekendColor = clrGray;           // Weekend highlight color
 
 // Global variables
 string objPrefix = "BarCountEnhanced_";
-double AvgRangeBuffer[];
 int barCounter = 0;
 datetime lastCountedBar = 0;
 
@@ -95,11 +75,6 @@ int GetFontSize()
 int OnInit()
 {
    IndicatorSetString(INDICATOR_SHORTNAME, "Bar Counter Enhanced");
-   
-   // Set up average range buffer
-   SetIndexBuffer(0, AvgRangeBuffer, INDICATOR_DATA);
-   ArraySetAsSeries(AvgRangeBuffer, true);
-   
    DeleteAllObjects();
    return(INIT_SUCCEEDED);
 }
@@ -152,34 +127,41 @@ int OnCalculate(const int rates_total,
    // Determine bars to process
    int limit = MaxBarsToProcess > 0 ? MathMin(MaxBarsToProcess, rates_total) : rates_total;
    
-   // Calculate average range
-   if(ShowAverageRange)
+   // Process bars from oldest to newest for correct counting
+   // First pass: build bar numbers from oldest to newest
+   int barNumbers[];
+   ArrayResize(barNumbers, limit);
+   ArrayInitialize(barNumbers, -1);
+   
+   // Reset the counter for a fresh count
+   ResetBarCounter();
+   
+   // Count from oldest to newest
+   for(int i = limit - 1; i >= 1; i--) // Process from oldest to newest, skip current bar [0]
    {
-      for(int i = 0; i < limit && i < rates_total - 1; i++)
-      {
-         double sum = 0;
-         int count = 0;
-         for(int j = i; j < i + AvgRangePeriod && j < rates_total; j++)
-         {
-            sum += (high[j] - low[j]);
-            count++;
-         }
-         AvgRangeBuffer[i] = count > 0 ? sum / count : 0;
-      }
+      datetime barTime = time[i];
+      MqlDateTime dt;
+      TimeToStruct(barTime, dt);
+      
+      // Check if weekend
+      bool isWeekend = (dt.day_of_week == 0 || dt.day_of_week == 6);
+      
+      // Calculate and store bar number
+      barNumbers[i] = CalculateBarNumber(barTime, dt, isWeekend);
    }
    
-   // Process bars
+   // Second pass: display the bars
    for(int i = 1; i < limit; i++) // Skip current bar [0]
    {
       datetime barTime = time[i];
       MqlDateTime dt;
       TimeToStruct(barTime, dt);
       
-      // Check if weekend and should skip
+      // Check if weekend
       bool isWeekend = (dt.day_of_week == 0 || dt.day_of_week == 6);
       
-      // Calculate bar number
-      int barNumber = CalculateBarNumber(barTime, dt, isWeekend);
+      // Get the pre-calculated bar number
+      int barNumber = barNumbers[i];
       
       // Skip weekend bars if requested
       if(SkipWeekends && isWeekend)
@@ -189,12 +171,6 @@ int OnCalculate(const int rates_total,
             CreateWeekendHighlight(barTime, high[i], low[i]);
          }
          continue;
-      }
-      
-      // Create background highlight if needed
-      if(EnableBackgroundHighlight && barNumber >= HighlightStart && barNumber <= HighlightEnd)
-      {
-         CreateBackgroundHighlight(barTime, high[i], low[i], barNumber);
       }
       
       // Display if interval matches or is a milestone
@@ -217,17 +193,23 @@ int OnCalculate(const int rates_total,
          
          // Create count display (text only)
          CreateCountText(objName, barTime, displayPrice, barNumber, isMilestone);
-         
-         // Display average range if enabled
-         if(ShowAverageRange && i < ArraySize(AvgRangeBuffer))
-         {
-            DisplayAverageRange(barTime, displayPrice, AvgRangeBuffer[i], barNumber);
-         }
       }
    }
    
    ChartRedraw();
    return(rates_total);
+}
+
+//+------------------------------------------------------------------+
+//| Reset bar counter static variables                               |
+//+------------------------------------------------------------------+
+void ResetBarCounter()
+{
+   // This will force the static variables to reset in CalculateBarNumber
+   MqlDateTime dt;
+   dt.day = -1;
+   bool dummy = false;
+   CalculateBarNumber(0, dt, dummy);
 }
 
 //+------------------------------------------------------------------+
@@ -237,27 +219,31 @@ int CalculateBarNumber(datetime barTime, MqlDateTime &dt, bool isWeekend)
 {
    static int dayCounter = 0;
    static int lastDay = -1;
-   static int weekendSkipCount = 0;
+   static datetime lastBarTime = 0;
+   static int currentDayBarCount = 0;
    
-   // Reset counter at day start
+   // Reset counter at day start (00:00)
    if(dt.day != lastDay)
    {
-      dayCounter = 0;
       lastDay = dt.day;
-      if(!isWeekend)
-         weekendSkipCount = 0;
+      currentDayBarCount = 0;
+      lastBarTime = 0;
    }
    
-   if(!isWeekend || !SkipWeekends)
+   // Skip weekend bars if requested
+   if(isWeekend && SkipWeekends)
    {
-      dayCounter++;
-      return dt.hour + 1 - weekendSkipCount;
-   }
-   else
-   {
-      weekendSkipCount++;
       return -1; // Skip this bar
    }
+   
+   // Only count if this is a new bar (different time)
+   if(barTime != lastBarTime)
+   {
+      currentDayBarCount++;
+      lastBarTime = barTime;
+   }
+   
+   return currentDayBarCount;
 }
 
 //+------------------------------------------------------------------+
@@ -265,19 +251,8 @@ int CalculateBarNumber(datetime barTime, MqlDateTime &dt, bool isWeekend)
 //+------------------------------------------------------------------+
 bool IsMilestone(int barNumber)
 {
-   if(!EnableMilestones) return false;
-   return (barNumber == Milestone1 || barNumber == Milestone2 || barNumber == Milestone3);
-}
-
-//+------------------------------------------------------------------+
-//| Get milestone color                                              |
-//+------------------------------------------------------------------+
-color GetMilestoneColor(int barNumber)
-{
-   if(barNumber == Milestone1) return MilestoneColor1;
-   if(barNumber == Milestone2) return MilestoneColor2;
-   if(barNumber == Milestone3) return MilestoneColor3;
-   return TextColor;
+   if(!EnableMilestones || MilestoneInterval <= 0) return false;
+   return (barNumber % MilestoneInterval == 0);
 }
 
 //+------------------------------------------------------------------+
@@ -288,34 +263,11 @@ void CreateCountText(string objName, datetime barTime, double price, int barNumb
    if(ObjectCreate(0, objName, OBJ_TEXT, 0, barTime, price))
    {
       ObjectSetString(0, objName, OBJPROP_TEXT, IntegerToString(barNumber));
-      ObjectSetInteger(0, objName, OBJPROP_COLOR, isMilestone ? GetMilestoneColor(barNumber) : TextColor);
+      ObjectSetInteger(0, objName, OBJPROP_COLOR, isMilestone ? MilestoneColor : TextColor);
       ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, isMilestone ? MilestoneSize : GetFontSize());
       ObjectSetString(0, objName, OBJPROP_FONT, FontName);
       ObjectSetInteger(0, objName, OBJPROP_ANCHOR, ANCHOR_CENTER);
       ObjectSetDouble(0, objName, OBJPROP_ANGLE, VerticalText ? 90.0 : 0.0);
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Create background highlight                                      |
-//+------------------------------------------------------------------+
-void CreateBackgroundHighlight(datetime barTime, double high, double low, int barNumber)
-{
-   string highlightName = GetObjectName(barTime, "highlight");
-   
-   if(ObjectFind(0, highlightName) >= 0)
-      return;
-   
-   datetime endTime = barTime + PeriodSeconds(PERIOD_CURRENT);
-   
-   if(ObjectCreate(0, highlightName, OBJ_RECTANGLE, 0, barTime, high, endTime, low))
-   {
-      long argbColor = ColorToARGB(HighlightColor, HighlightAlpha);
-      ObjectSetInteger(0, highlightName, OBJPROP_COLOR, argbColor);
-      ObjectSetInteger(0, highlightName, OBJPROP_STYLE, STYLE_SOLID);
-      ObjectSetInteger(0, highlightName, OBJPROP_WIDTH, 0);
-      ObjectSetInteger(0, highlightName, OBJPROP_FILL, true);
-      ObjectSetInteger(0, highlightName, OBJPROP_BACK, true);
    }
 }
 
@@ -374,34 +326,6 @@ void DisplayTimeUntilNextBar()
    ObjectSetInteger(0, objName, OBJPROP_COLOR, TimeRemainingColor);
    ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, 10);
    ObjectSetString(0, objName, OBJPROP_FONT, "Arial");
-}
-
-//+------------------------------------------------------------------+
-//| Display average range                                            |
-//+------------------------------------------------------------------+
-void DisplayAverageRange(datetime barTime, double price, double avgRange, int barNumber)
-{
-   string objName = GetObjectName(barTime, "avgrange");
-   
-   if(ObjectFind(0, objName) >= 0)
-      return;
-   
-   // Format average range display
-   double rangeInPoints = avgRange / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   string rangeText = "R:" + DoubleToString(rangeInPoints, 0);
-   
-   // Position below the count
-   double offset = CalculateOffset() * 2;
-   double displayPrice = DisplayAboveBar ? price - offset : price - offset;
-   
-   if(ObjectCreate(0, objName, OBJ_TEXT, 0, barTime, displayPrice))
-   {
-      ObjectSetString(0, objName, OBJPROP_TEXT, rangeText);
-      ObjectSetInteger(0, objName, OBJPROP_COLOR, AvgRangeColor);
-      ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, MathMax(6, GetFontSize() - 2));
-      ObjectSetString(0, objName, OBJPROP_FONT, FontName);
-      ObjectSetInteger(0, objName, OBJPROP_ANCHOR, ANCHOR_CENTER);
-   }
 }
 
 //+------------------------------------------------------------------+

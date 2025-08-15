@@ -530,33 +530,57 @@ bool DetectStruggle(SRLevel &level, int index, const double &high[], const doubl
                    const double &close[], const datetime &time[])
 {
    double levelZone = level.price * InpZoneWidth;
-   int struggleBars = 0;
+   int touchCount = 0;
    double priceRange = 0;
    
-   // Look at last 5-10 bars for struggle behavior
+   // Look at last 5-10 bars for actual touches and struggle behavior
    for(int i = index; i < MathMin(index + 10, ArraySize(high)); i++)
    {
-      // Check if price is near the level
-      if((MathAbs(high[i] - level.price) < levelZone) || 
-         (MathAbs(low[i] - level.price) < levelZone))
+      bool touched = false;
+      
+      // Check for actual touch based on level type
+      if(level.isResistance)
       {
-         struggleBars++;
+         // Resistance: high must reach or exceed the level
+         if(high[i] >= level.price - levelZone && high[i] <= level.price + levelZone)
+         {
+            touched = true;
+         }
+      }
+      else
+      {
+         // Support: low must reach or go below the level
+         if(low[i] <= level.price + levelZone && low[i] >= level.price - levelZone)
+         {
+            touched = true;
+         }
+      }
+      
+      if(touched)
+      {
+         touchCount++;
          priceRange += (high[i] - low[i]);
+         
+         // Check if price failed to break through (wick rejection)
+         if(level.isResistance && close[i] < level.price)
+         {
+            // Touched resistance but closed below = rejection
+            touchCount++; // Extra weight for rejection
+         }
+         else if(!level.isResistance && close[i] > level.price)
+         {
+            // Touched support but closed above = rejection
+            touchCount++; // Extra weight for rejection
+         }
       }
    }
    
-   // Struggle = multiple bars near level with small range (consolidation)
-   if(struggleBars >= 3)
+   // Struggle = multiple actual touches with rejections
+   if(touchCount >= 3)
    {
-      double avgRange = priceRange / struggleBars;
-      double normalRange = SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 50; // Normal bar range
-      
-      if(avgRange < normalRange * 1.5) // Compressed range = struggle
-      {
-         level.struggleCount++;
-         level.lastStruggle = time[index];
-         return true;
-      }
+      level.struggleCount++;
+      level.lastStruggle = time[index];
+      return true;
    }
    
    return false;
@@ -569,27 +593,50 @@ bool DetectBounce(SRLevel &level, int index, const double &high[], const double 
                  const double &close[], const double &open[])
 {
    double levelZone = level.price * InpZoneWidth;
+   bool actualTouch = false;
    
    if(level.isResistance)
    {
-      // Strong bearish rejection from resistance
-      if(MathAbs(high[index] - level.price) < levelZone && 
-         close[index] < open[index] && 
-         (open[index] - close[index]) > (high[index] - low[index]) * 0.6)
+      // Check for actual touch of resistance (high reaches level)
+      if(high[index] >= level.price - levelZone && high[index] <= level.price + levelZone)
       {
-         level.bounceCount++;
-         return true;
+         actualTouch = true;
+         
+         // Now classify the touch behavior
+         if(close[index] < level.price - levelZone)
+         {
+            // Touch with wick - closed well below resistance
+            double wickSize = high[index] - MathMax(open[index], close[index]);
+            double bodySize = MathAbs(close[index] - open[index]);
+            
+            if(wickSize > bodySize * 1.5) // Strong wick rejection
+            {
+               level.bounceCount++;
+               return true;
+            }
+         }
       }
    }
    else
    {
-      // Strong bullish rejection from support
-      if(MathAbs(low[index] - level.price) < levelZone && 
-         close[index] > open[index] && 
-         (close[index] - open[index]) > (high[index] - low[index]) * 0.6)
+      // Check for actual touch of support (low reaches level)
+      if(low[index] <= level.price + levelZone && low[index] >= level.price - levelZone)
       {
-         level.bounceCount++;
-         return true;
+         actualTouch = true;
+         
+         // Now classify the touch behavior
+         if(close[index] > level.price + levelZone)
+         {
+            // Touch with wick - closed well above support
+            double wickSize = MathMin(open[index], close[index]) - low[index];
+            double bodySize = MathAbs(close[index] - open[index]);
+            
+            if(wickSize > bodySize * 1.5) // Strong wick rejection
+            {
+               level.bounceCount++;
+               return true;
+            }
+         }
       }
    }
    
@@ -610,35 +657,63 @@ void CheckForRetest(SRLevel &level, int index, const double &high[], const doubl
    // Look for retest within 20 bars of break
    if(barsSinceBreak > 0 && barsSinceBreak < 20)
    {
-      // Check if price returned to test the level
+      // Check if price actually touches the level for retest
       if(level.hasFlipped) // Was resistance, now support
       {
-         if(MathAbs(low[index] - level.price) < levelZone && close[index] > level.price)
+         // For support retest: low must actually reach the level
+         if(low[index] <= level.price + levelZone && low[index] >= level.price - levelZone)
          {
-            level.wasRetested = true;
-            level.retestCount++;
-            
-            // Calculate retest quality (how cleanly it held)
-            double wickRatio = 0;
-            double openPrice = iOpen(_Symbol, PERIOD_CURRENT, index);
-            double closePrice = iClose(_Symbol, PERIOD_CURRENT, index);
-            double highPrice = iHigh(_Symbol, PERIOD_CURRENT, index);
-            double lowPrice = iLow(_Symbol, PERIOD_CURRENT, index);
-            
-            if(closePrice > openPrice)
-               wickRatio = (closePrice - lowPrice) / (highPrice - lowPrice);
-            else
-               wickRatio = (openPrice - lowPrice) / (highPrice - lowPrice);
+            // Actual touch detected - now check if it held
+            if(close[index] > level.price)
+            {
+               level.wasRetested = true;
+               level.retestCount++;
                
-            level.retestQuality = MathMin(1.0, wickRatio * 1.5);
+               // Calculate retest quality based on rejection strength
+               double openPrice = iOpen(_Symbol, PERIOD_CURRENT, index);
+               double closePrice = iClose(_Symbol, PERIOD_CURRENT, index);
+               double highPrice = iHigh(_Symbol, PERIOD_CURRENT, index);
+               double lowPrice = iLow(_Symbol, PERIOD_CURRENT, index);
+               
+               // Strong rejection = large wick below
+               double wickSize = MathMin(openPrice, closePrice) - lowPrice;
+               double bodySize = MathAbs(closePrice - openPrice);
+               double totalRange = highPrice - lowPrice;
+               
+               if(totalRange > 0)
+               {
+                  level.retestQuality = MathMin(1.0, (wickSize / totalRange) * 2);
+               }
+            }
+            else
+            {
+               // Touch but closed below = failed retest
+               level.falseBreakCount++;
+               level.retestQuality = 0.2;
+            }
          }
       }
-      else if(!level.hasFlipped) // Still broken, checking for failed retest
+      else if(!level.hasFlipped) // Still broken, checking for failed retest  
       {
-         if(MathAbs(high[index] - level.price) < levelZone && close[index] < level.price)
+         // For broken resistance: high must actually reach the level
+         if(level.isResistance && high[index] >= level.price - levelZone && high[index] <= level.price + levelZone)
          {
-            level.wasRetested = true;
-            level.retestQuality = 0.3; // Failed retest = weak level
+            if(close[index] < level.price)
+            {
+               // Touched but rejected = potential flip
+               level.falseBreakCount++;
+               level.retestQuality = 0.3;
+            }
+         }
+         // For broken support: low must actually reach the level
+         else if(!level.isResistance && low[index] <= level.price + levelZone && low[index] >= level.price - levelZone)
+         {
+            if(close[index] > level.price)
+            {
+               // Touched but rejected = potential flip
+               level.falseBreakCount++;
+               level.retestQuality = 0.3;
+            }
          }
       }
    }
