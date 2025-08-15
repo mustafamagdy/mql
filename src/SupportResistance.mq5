@@ -61,7 +61,7 @@ input bool     InpSendEmail = false;                // Send Email Alerts
 
 // No buffers needed - using graphical objects only
 
-// Structure for S/R levels
+// Structure for S/R levels with behavior tracking
 struct SRLevel
 {
    double price;
@@ -76,6 +76,18 @@ struct SRLevel
    bool hasFlipped;       // Has this level flipped from R to S or S to R
    int flipCount;         // Number of times it has flipped
    int retestCount;       // Number of successful retests after flip
+   
+   // Behavior tracking
+   int struggleCount;     // Number of times price struggled at this level
+   int cleanBreakCount;   // Times price broke through without resistance
+   int falseBreakCount;   // Times price broke but returned (fake outs)
+   int bounceCount;       // Strong rejections from this level
+   double avgHoldTime;    // Average time price respects this level
+   datetime lastStruggle; // Last time price struggled here
+   bool wasRetested;      // If level was retested after break
+   double retestQuality;  // Quality of retest (0-1, higher is better)
+   int consecutiveFails;  // Consecutive times level failed to hold
+   double behaviorScore;  // Overall behavior score (0-100)
 };
 
 // Global variables
@@ -451,39 +463,181 @@ void ProcessNewLevel(double price, bool isResistance, datetime time)
 }
 
 //+------------------------------------------------------------------+
-//| Calculate level strength                                        |
+//| Calculate level strength based on behavior                      |
 //+------------------------------------------------------------------+
 double CalculateLevelStrength(SRLevel &level)
 {
+   // Behavior-weighted strength calculation
    double strength = 0;
    
-   // Factor 1: Number of touches (max contribution: 0.2)
-   strength += MathMin(0.2, level.touches * 0.05);
+   // 1. Struggle behavior (30% weight) - More struggles = stronger level
+   double struggleScore = MathMin(1.0, level.struggleCount / 5.0); // Max at 5 struggles
+   strength += struggleScore * 0.30;
    
-   // Factor 2: Age of level (max contribution: 0.15)
-   int ageBars = (int)((TimeCurrent() - level.firstSeen) / PeriodSeconds());
-   strength += MathMin(0.15, ageBars / 1000.0);
+   // 2. Bounce quality (25% weight) - Strong rejections indicate strength
+   double bounceScore = MathMin(1.0, level.bounceCount / 3.0); // Max at 3 strong bounces
+   strength += bounceScore * 0.25;
    
-   // Factor 3: Recent testing (max contribution: 0.15)
-   int recentBars = (int)((TimeCurrent() - level.lastTested) / PeriodSeconds());
-   if(recentBars < 100)
-      strength += 0.15 * (1.0 - recentBars / 100.0);
-   
-   // Factor 4: Volume at level (max contribution: 0.2)
-   if(InpUseVolume && volumeOsc > InpVolumeThreshold)
-      strength += 0.2;
-   
-   // Factor 5: Role reversal bonus (max contribution: 0.3)
-   if(level.hasFlipped)
+   // 3. Retest quality (20% weight) - Successful retests after break
+   if(level.wasRetested)
    {
-      // Flipped levels that successfully retest are very strong
-      strength += 0.1; // Base bonus for flipping
-      strength += MathMin(0.2, level.retestCount * 0.1); // Bonus for successful retests
+      strength += level.retestQuality * 0.20;
+   }
+   else if(level.isBroken && !level.wasRetested)
+   {
+      strength -= 0.10; // Penalty for unretested breaks
    }
    
-   return MathMin(1.0, strength);
+   // 4. False break resistance (15% weight) - Surviving false breaks = strength
+   double falseBreakScore = MathMin(1.0, level.falseBreakCount / 2.0) * 0.8; // Some false breaks are good
+   strength += falseBreakScore * 0.15;
+   
+   // 5. Clean break penalty (negative weight) - Easy breaks = weakness
+   double cleanBreakPenalty = MathMin(0.3, level.cleanBreakCount * 0.15);
+   strength -= cleanBreakPenalty;
+   
+   // 6. Consecutive fails penalty - Multiple failures = dying level
+   double failPenalty = level.consecutiveFails * 0.15;
+   strength -= failPenalty;
+   
+   // 7. Time-based factors (10% weight)
+   int recentBars = (int)((TimeCurrent() - level.lastTested) / PeriodSeconds());
+   if(recentBars < 50) // Recently tested
+   {
+      strength += 0.10 * (1.0 - recentBars / 50.0);
+   }
+   
+   // 8. Role reversal bonus - Flipped levels that hold are very strong
+   if(level.hasFlipped && level.retestCount > 0)
+   {
+      strength += 0.15 + (level.retestCount * 0.05); // Big bonus for proven role reversal
+   }
+   
+   // Normalize to 0-1 range
+   strength = MathMax(0.0, MathMin(1.0, strength));
+   
+   // Update behavior score (0-100 for display)
+   level.behaviorScore = strength * 100;
+   
+   return strength;
 }
 
+
+//+------------------------------------------------------------------+
+//| Detect if price is struggling at a level                        |
+//+------------------------------------------------------------------+
+bool DetectStruggle(SRLevel &level, int index, const double &high[], const double &low[], 
+                   const double &close[], const datetime &time[])
+{
+   double levelZone = level.price * InpZoneWidth;
+   int struggleBars = 0;
+   double priceRange = 0;
+   
+   // Look at last 5-10 bars for struggle behavior
+   for(int i = index; i < MathMin(index + 10, ArraySize(high)); i++)
+   {
+      // Check if price is near the level
+      if((MathAbs(high[i] - level.price) < levelZone) || 
+         (MathAbs(low[i] - level.price) < levelZone))
+      {
+         struggleBars++;
+         priceRange += (high[i] - low[i]);
+      }
+   }
+   
+   // Struggle = multiple bars near level with small range (consolidation)
+   if(struggleBars >= 3)
+   {
+      double avgRange = priceRange / struggleBars;
+      double normalRange = SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 50; // Normal bar range
+      
+      if(avgRange < normalRange * 1.5) // Compressed range = struggle
+      {
+         level.struggleCount++;
+         level.lastStruggle = time[index];
+         return true;
+      }
+   }
+   
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Detect bounce from level                                        |
+//+------------------------------------------------------------------+
+bool DetectBounce(SRLevel &level, int index, const double &high[], const double &low[], 
+                 const double &close[], const double &open[])
+{
+   double levelZone = level.price * InpZoneWidth;
+   
+   if(level.isResistance)
+   {
+      // Strong bearish rejection from resistance
+      if(MathAbs(high[index] - level.price) < levelZone && 
+         close[index] < open[index] && 
+         (open[index] - close[index]) > (high[index] - low[index]) * 0.6)
+      {
+         level.bounceCount++;
+         return true;
+      }
+   }
+   else
+   {
+      // Strong bullish rejection from support
+      if(MathAbs(low[index] - level.price) < levelZone && 
+         close[index] > open[index] && 
+         (close[index] - open[index]) > (high[index] - low[index]) * 0.6)
+      {
+         level.bounceCount++;
+         return true;
+      }
+   }
+   
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Check for retest after break                                    |
+//+------------------------------------------------------------------+
+void CheckForRetest(SRLevel &level, int index, const double &high[], const double &low[], 
+                   const double &close[], const datetime &time[])
+{
+   if(!level.isBroken || level.wasRetested) return;
+   
+   double levelZone = level.price * InpZoneWidth;
+   int barsSinceBreak = (int)((time[index] - level.brokenTime) / PeriodSeconds());
+   
+   // Look for retest within 20 bars of break
+   if(barsSinceBreak > 0 && barsSinceBreak < 20)
+   {
+      // Check if price returned to test the level
+      if(level.hasFlipped) // Was resistance, now support
+      {
+         if(MathAbs(low[index] - level.price) < levelZone && close[index] > level.price)
+         {
+            level.wasRetested = true;
+            level.retestCount++;
+            
+            // Calculate retest quality (how cleanly it held)
+            double wickRatio = 0;
+            if(close[index] > open[index])
+               wickRatio = (close[index] - low[index]) / (high[index] - low[index]);
+            else
+               wickRatio = (open[index] - low[index]) / (high[index] - low[index]);
+               
+            level.retestQuality = MathMin(1.0, wickRatio * 1.5);
+         }
+      }
+      else if(!level.hasFlipped) // Still broken, checking for failed retest
+      {
+         if(MathAbs(high[index] - level.price) < levelZone && close[index] < level.price)
+         {
+            level.wasRetested = true;
+            level.retestQuality = 0.3; // Failed retest = weak level
+         }
+      }
+   }
+}
 
 //+------------------------------------------------------------------+
 //| Check for level breaks and role reversals                       |
@@ -496,28 +650,64 @@ void CheckForBreaks(int index, const double &high[], const double &low[],
       double level = levels[i].price;
       double breakBuffer = level * InpBreakBuffer;
       
+      // First check for struggles and bounces
+      DetectStruggle(levels[i], index, high, low, close, time);
+      DetectBounce(levels[i], index, high, low, close, open);
+      CheckForRetest(levels[i], index, high, low, close, time);
+      
       // Check for breaks and role reversals
       if(levels[i].isResistance)
       {
          // Resistance level
          if(close[index] > level + breakBuffer && close[index + 1] <= level)
          {
-            // Check volume condition
-            if(!InpRequireVolumeForBreak || volumeOsc > InpVolumeThreshold)
+            // Determine break quality
+            bool isCleanBreak = (close[index] - level) > breakBuffer * 3; // Strong break
+            bool hasVolume = volumeOsc > InpVolumeThreshold;
+            
+            if(!InpRequireVolumeForBreak || hasVolume)
             {
-               // Resistance broken - flip to support
-               levels[i].isResistance = false;  // Now becomes support
-               levels[i].hasFlipped = true;
-               levels[i].flipCount++;
+               levels[i].isBroken = true;
                levels[i].brokenTime = time[index];
-               levels[i].strength = MathMax(0.5, levels[i].strength * 0.8); // Reduce strength slightly
-               stats.totalBreaks++;
                
-               // Alert
-               if(InpEnableAlerts && InpAlertBreaks)
+               // Check if this becomes a false break later (look ahead 3 bars)
+               bool isFalseBreak = false;
+               for(int j = MathMax(0, index - 3); j < index; j++)
                {
-                  string msg = StringFormat("Resistance broken at %.5f - Now Support", level);
-                  SendAlert(msg);
+                  if(close[j] < level) // Price came back below
+                  {
+                     isFalseBreak = true;
+                     break;
+                  }
+               }
+               
+               if(isFalseBreak)
+               {
+                  levels[i].falseBreakCount++;
+                  levels[i].isBroken = false; // Reset
+                  levels[i].strength = CalculateLevelStrength(levels[i]); // Recalculate
+               }
+               else
+               {
+                  // True break - flip to support
+                  if(isCleanBreak)
+                  {
+                     levels[i].cleanBreakCount++;
+                     levels[i].consecutiveFails = 0; // Reset fail counter
+                  }
+                  
+                  levels[i].isResistance = false;  // Now becomes support
+                  levels[i].hasFlipped = true;
+                  levels[i].flipCount++;
+                  levels[i].strength = CalculateLevelStrength(levels[i]);
+                  stats.totalBreaks++;
+                  
+                  // Alert
+                  if(InpEnableAlerts && InpAlertBreaks)
+                  {
+                     string msg = StringFormat("Resistance broken at %.5f - Now Support", level);
+                     SendAlert(msg);
+                  }
                }
             }
          }
@@ -878,7 +1068,11 @@ void DrawLevelLabels()
    for(int i = 0; i < levelCount; i++)
    {
       double price = levels[i].price;
-      bool isStrong = (levels[i].strength >= 0.7);
+      // Use behavior score for strength assessment
+      double behaviorStrength = levels[i].behaviorScore / 100.0; // Convert to 0-1 range
+      bool isStrong = (behaviorStrength >= 0.7);
+      bool isMedium = (behaviorStrength >= 0.4 && behaviorStrength < 0.7);
+      bool isWeak = (behaviorStrength < 0.4);
       bool hasFlipped = levels[i].hasFlipped;
       
       // Draw trend line from first seen to future
@@ -892,43 +1086,108 @@ void DrawLevelLabels()
       
       if(ObjectCreate(0, lineName, OBJ_TREND, 0, startTime, price, futureTime, price))
       {
-         // Determine color and style based on level type, strength, and if flipped
+         // Determine color and style based on behavior score
          color lineColor;
          int lineStyle;
          int lineWidth;
          
+         // Enhanced coloring based on behavior patterns
          if(levels[i].isResistance)
          {
-            // Resistance
+            // Resistance levels
             if(hasFlipped)
             {
-               // Flipped level (was support, now resistance)
-               lineColor = C'255,150,150'; // Light red with purple tint to show it flipped
-               lineStyle = (levels[i].retestCount > 0) ? STYLE_SOLID : STYLE_DASHDOT;
-               lineWidth = (levels[i].retestCount > 0) ? 2 : 1;
+               // Flipped level with behavior-based coloring
+               if(levels[i].wasRetested && levels[i].retestQuality > 0.7)
+               {
+                  lineColor = C'200,0,200'; // Strong purple for well-tested flips
+                  lineStyle = STYLE_SOLID;
+                  lineWidth = 3;
+               }
+               else
+               {
+                  lineColor = C'255,150,150'; // Light red with purple tint
+                  lineStyle = STYLE_DASHDOT;
+                  lineWidth = 2;
+               }
             }
             else
             {
-               lineColor = isStrong ? InpStrongResistanceColor : InpWeakResistanceColor;
-               lineStyle = isStrong ? STYLE_SOLID : STYLE_DOT;
-               lineWidth = isStrong ? 2 : 1;
+               // Color based on behavior score
+               if(isStrong)
+               {
+                  lineColor = InpStrongResistanceColor;
+                  lineStyle = STYLE_SOLID;
+                  lineWidth = (levels[i].struggleCount > 5) ? 3 : 2;
+               }
+               else if(isMedium)
+               {
+                  lineColor = C'255,100,100'; // Medium red
+                  lineStyle = STYLE_DASH;
+                  lineWidth = 2;
+               }
+               else
+               {
+                  lineColor = InpWeakResistanceColor;
+                  lineStyle = STYLE_DOT;
+                  lineWidth = 1;
+               }
+               
+               // Special case: many clean breaks = weakening level
+               if(levels[i].cleanBreakCount > 2)
+               {
+                  lineColor = C'255,200,200'; // Very light red
+                  lineStyle = STYLE_DASHDOTDOT;
+               }
             }
          }
          else
          {
-            // Support
+            // Support levels
             if(hasFlipped)
             {
-               // Flipped level (was resistance, now support)
-               lineColor = C'150,150,255'; // Light blue with purple tint to show it flipped
-               lineStyle = (levels[i].retestCount > 0) ? STYLE_SOLID : STYLE_DASHDOT;
-               lineWidth = (levels[i].retestCount > 0) ? 2 : 1;
+               // Flipped level with behavior-based coloring
+               if(levels[i].wasRetested && levels[i].retestQuality > 0.7)
+               {
+                  lineColor = C'0,200,200'; // Strong cyan for well-tested flips
+                  lineStyle = STYLE_SOLID;
+                  lineWidth = 3;
+               }
+               else
+               {
+                  lineColor = C'150,150,255'; // Light blue with purple tint
+                  lineStyle = STYLE_DASHDOT;
+                  lineWidth = 2;
+               }
             }
             else
             {
-               lineColor = isStrong ? InpStrongSupportColor : InpWeakSupportColor;
-               lineStyle = isStrong ? STYLE_SOLID : STYLE_DOT;
-               lineWidth = isStrong ? 2 : 1;
+               // Color based on behavior score
+               if(isStrong)
+               {
+                  lineColor = InpStrongSupportColor;
+                  lineStyle = STYLE_SOLID;
+                  lineWidth = (levels[i].struggleCount > 5) ? 3 : 2;
+               }
+               else if(isMedium)
+               {
+                  lineColor = C'100,100,255'; // Medium blue
+                  lineStyle = STYLE_DASH;
+                  lineWidth = 2;
+               }
+               else
+               {
+                  lineColor = InpWeakSupportColor;
+                  lineStyle = STYLE_DOT;
+                  lineWidth = 1;
+               }
+               
+               // Special case: many clean breaks = weakening level
+               if(levels[i].cleanBreakCount > 2)
+               {
+                  lineColor = C'200,200,255'; // Very light blue
+                  lineStyle = STYLE_DASHDOTDOT;
+               }
             }
          }
          
@@ -964,24 +1223,60 @@ void DrawLevelLabels()
                statusText = StringFormat(" [FLIP:%d RT:%d]", levels[i].flipCount, levels[i].retestCount);
             }
             
-            string text = StringFormat("%s %.5f (T:%d, S:%.0f%%)%s",
+            // Add behavior indicators to label
+            string behaviorText = "";
+            if(levels[i].struggleCount > 0)
+               behaviorText += StringFormat(" ST:%d", levels[i].struggleCount);
+            if(levels[i].bounceCount > 0)
+               behaviorText += StringFormat(" B:%d", levels[i].bounceCount);
+            if(levels[i].cleanBreakCount > 0)
+               behaviorText += StringFormat(" CB:%d", levels[i].cleanBreakCount);
+            if(levels[i].falseBreakCount > 0)
+               behaviorText += StringFormat(" FB:%d", levels[i].falseBreakCount);
+            
+            string text = StringFormat("%s %.5f (BS:%.0f%%)%s%s",
                                       levels[i].isResistance ? "R" : "S",
                                       price,
-                                      levels[i].touches,
-                                      levels[i].strength * 100,
+                                      levels[i].behaviorScore,
+                                      behaviorText,
                                       statusText);
             
             color textColor;
             if(hasFlipped)
             {
-               // Flipped levels get special coloring
-               textColor = (levels[i].retestCount > 0) ? C'128,0,128' : clrGray; // Purple for tested flips
+               // Flipped levels get special coloring based on retest quality
+               if(levels[i].wasRetested && levels[i].retestQuality > 0.7)
+                  textColor = C'128,0,128'; // Strong purple for well-tested flips
+               else if(levels[i].retestCount > 0)
+                  textColor = C'200,100,200'; // Light purple for tested flips
+               else
+                  textColor = clrGray; // Gray for untested flips
             }
             else
             {
-               textColor = (levels[i].isResistance || price > currentPrice) ? 
-                          (isStrong ? InpStrongResistanceColor : InpWeakResistanceColor) :
-                          (isStrong ? InpStrongSupportColor : InpWeakSupportColor);
+               // Color based on behavior score
+               if(levels[i].isResistance)
+               {
+                  if(isStrong)
+                     textColor = InpStrongResistanceColor;
+                  else if(isMedium)
+                     textColor = C'255,100,100'; // Medium red
+                  else
+                     textColor = InpWeakResistanceColor;
+               }
+               else
+               {
+                  if(isStrong)
+                     textColor = InpStrongSupportColor;
+                  else if(isMedium)
+                     textColor = C'100,100,255'; // Medium blue
+                  else
+                     textColor = InpWeakSupportColor;
+               }
+               
+               // Special case: weakened levels
+               if(levels[i].cleanBreakCount > 2)
+                  textColor = clrLightGray;
             }
             
             ObjectSetString(0, labelName, OBJPROP_TEXT, text);
