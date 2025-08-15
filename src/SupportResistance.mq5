@@ -620,10 +620,15 @@ void CheckForRetest(SRLevel &level, int index, const double &high[], const doubl
             
             // Calculate retest quality (how cleanly it held)
             double wickRatio = 0;
-            if(close[index] > open[index])
-               wickRatio = (close[index] - low[index]) / (high[index] - low[index]);
+            double openPrice = iOpen(_Symbol, PERIOD_CURRENT, index);
+            double closePrice = iClose(_Symbol, PERIOD_CURRENT, index);
+            double highPrice = iHigh(_Symbol, PERIOD_CURRENT, index);
+            double lowPrice = iLow(_Symbol, PERIOD_CURRENT, index);
+            
+            if(closePrice > openPrice)
+               wickRatio = (closePrice - lowPrice) / (highPrice - lowPrice);
             else
-               wickRatio = (open[index] - low[index]) / (high[index] - low[index]);
+               wickRatio = (openPrice - lowPrice) / (highPrice - lowPrice);
                
             level.retestQuality = MathMin(1.0, wickRatio * 1.5);
          }

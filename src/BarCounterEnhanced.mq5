@@ -14,12 +14,22 @@
 #property indicator_label1  "AvgRange"
 #property indicator_type1   DRAW_NONE
 
+// Font size enumeration
+enum ENUM_FONT_SIZE
+{
+   FONT_SMALL = 0,     // Small (8pt)
+   FONT_MEDIUM = 1,    // Medium (10pt)
+   FONT_LARGE = 2,     // Large (12pt)
+   FONT_CUSTOM = 3     // Custom Size
+};
+
 // Input parameters - Display Settings
 input group "Display Settings"
 input int DisplayInterval = 1;                // Display count every X bars (1 = every bar)
 input bool DisplayAboveBar = false;           // Display above high (true) or below low (false)
 input color TextColor = clrRed;               // Text color for bar count
-input int TextSize = 10;                      // Font size (6-20 recommended)
+input ENUM_FONT_SIZE FontSizeOption = FONT_MEDIUM; // Font size option
+input int CustomFontSize = 10;                // Custom font size (used when Custom is selected)
 input string FontName = "Arial";              // Font name
 input int TextOffset = 5;                     // Vertical offset (in ticks, 0=auto)
 input bool VerticalText = true;               // Display text vertically (90 degrees rotation)
@@ -27,23 +37,19 @@ input int MaxBarsToProcess = 500;             // Maximum bars to process (0 = al
 
 // Input parameters - Enhanced Features
 input group "Enhanced Features"
-input bool UseCountBoxes = true;              // Use boxes instead of text
-input color BoxColor = clrRed;                // Box fill color
-input color BoxBorderColor = clrWhite;        // Box border color
-input int BoxAlpha = 30;                      // Box transparency (0-255, 0=transparent)
 input bool ShowTimeUntilNextBar = true;       // Show time remaining for current bar
 input color TimeRemainingColor = clrYellow;   // Color for time remaining display
 input bool ShowAverageRange = true;           // Show average bar range
 input int AvgRangePeriod = 20;                // Period for average range calculation
 input color AvgRangeColor = clrAqua;          // Color for average range display
 
-// Input parameters - Highlighting
-input group "Highlighting Settings"
-input bool EnableBackgroundHighlight = true;   // Enable background highlighting
+// Input parameters - Bar Range Highlighting
+input group "Bar Range Highlighting"
+input bool EnableBackgroundHighlight = true;   // Enable background highlighting for bar ranges
 input int HighlightStart = 5;                 // Start highlighting from bar X
 input int HighlightEnd = 15;                  // End highlighting at bar X
-input color HighlightColor = clrGold;         // Highlight color
-input int HighlightAlpha = 20;                // Highlight transparency (0-255)
+input color HighlightColor = clrGold;         // Bar range highlight color
+input int HighlightAlpha = 20;                // Bar range transparency (0-255)
 
 // Input parameters - Milestone Markers
 input group "Milestone Settings"
@@ -67,6 +73,21 @@ string objPrefix = "BarCountEnhanced_";
 double AvgRangeBuffer[];
 int barCounter = 0;
 datetime lastCountedBar = 0;
+
+//+------------------------------------------------------------------+
+//| Get actual font size based on selection                          |
+//+------------------------------------------------------------------+
+int GetFontSize()
+{
+   switch(FontSizeOption)
+   {
+      case FONT_SMALL:  return 8;
+      case FONT_MEDIUM: return 10;
+      case FONT_LARGE:  return 12;
+      case FONT_CUSTOM: return CustomFontSize;
+      default:          return 10;
+   }
+}
 
 //+------------------------------------------------------------------+
 //| Custom indicator initialization function                         |
@@ -194,15 +215,8 @@ int OnCalculate(const int rates_total,
          else
             displayPrice -= offset;
          
-         // Create count display
-         if(UseCountBoxes)
-         {
-            CreateCountBox(objName, barTime, displayPrice, barNumber, isMilestone);
-         }
-         else
-         {
-            CreateCountText(objName, barTime, displayPrice, barNumber, isMilestone);
-         }
+         // Create count display (text only)
+         CreateCountText(objName, barTime, displayPrice, barNumber, isMilestone);
          
          // Display average range if enabled
          if(ShowAverageRange && i < ArraySize(AvgRangeBuffer))
@@ -267,46 +281,6 @@ color GetMilestoneColor(int barNumber)
 }
 
 //+------------------------------------------------------------------+
-//| Create count box                                                 |
-//+------------------------------------------------------------------+
-void CreateCountBox(string objName, datetime barTime, double price, int barNumber, bool isMilestone)
-{
-   // Create rectangle label for box effect
-   string boxName = objName + "_box";
-   
-   // Calculate box dimensions
-   datetime endTime = barTime + PeriodSeconds(PERIOD_CURRENT);
-   double boxHeight = SymbolInfoDouble(_Symbol, SYMBOL_POINT) * TextSize * 2;
-   
-   if(ObjectCreate(0, boxName, OBJ_RECTANGLE, 0, barTime, price - boxHeight/2, endTime, price + boxHeight/2))
-   {
-      color fillColor = isMilestone ? GetMilestoneColor(barNumber) : BoxColor;
-      color borderColor = isMilestone ? GetMilestoneColor(barNumber) : BoxBorderColor;
-      
-      ObjectSetInteger(0, boxName, OBJPROP_COLOR, borderColor);
-      ObjectSetInteger(0, boxName, OBJPROP_STYLE, STYLE_SOLID);
-      ObjectSetInteger(0, boxName, OBJPROP_WIDTH, 1);
-      ObjectSetInteger(0, boxName, OBJPROP_FILL, true);
-      ObjectSetInteger(0, boxName, OBJPROP_BACK, true);
-      
-      // Set fill color with transparency
-      long argbColor = ColorToARGB(fillColor, BoxAlpha);
-      ObjectSetInteger(0, boxName, OBJPROP_COLOR, argbColor);
-   }
-   
-   // Create text inside box
-   if(ObjectCreate(0, objName, OBJ_TEXT, 0, barTime, price))
-   {
-      ObjectSetString(0, objName, OBJPROP_TEXT, IntegerToString(barNumber));
-      ObjectSetInteger(0, objName, OBJPROP_COLOR, isMilestone ? clrWhite : TextColor);
-      ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, isMilestone ? MilestoneSize : TextSize);
-      ObjectSetString(0, objName, OBJPROP_FONT, FontName);
-      ObjectSetInteger(0, objName, OBJPROP_ANCHOR, ANCHOR_CENTER);
-      ObjectSetDouble(0, objName, OBJPROP_ANGLE, VerticalText ? 90.0 : 0.0);
-   }
-}
-
-//+------------------------------------------------------------------+
 //| Create count text                                                |
 //+------------------------------------------------------------------+
 void CreateCountText(string objName, datetime barTime, double price, int barNumber, bool isMilestone)
@@ -315,7 +289,7 @@ void CreateCountText(string objName, datetime barTime, double price, int barNumb
    {
       ObjectSetString(0, objName, OBJPROP_TEXT, IntegerToString(barNumber));
       ObjectSetInteger(0, objName, OBJPROP_COLOR, isMilestone ? GetMilestoneColor(barNumber) : TextColor);
-      ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, isMilestone ? MilestoneSize : TextSize);
+      ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, isMilestone ? MilestoneSize : GetFontSize());
       ObjectSetString(0, objName, OBJPROP_FONT, FontName);
       ObjectSetInteger(0, objName, OBJPROP_ANCHOR, ANCHOR_CENTER);
       ObjectSetDouble(0, objName, OBJPROP_ANGLE, VerticalText ? 90.0 : 0.0);
@@ -424,7 +398,7 @@ void DisplayAverageRange(datetime barTime, double price, double avgRange, int ba
    {
       ObjectSetString(0, objName, OBJPROP_TEXT, rangeText);
       ObjectSetInteger(0, objName, OBJPROP_COLOR, AvgRangeColor);
-      ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, TextSize - 2);
+      ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, MathMax(6, GetFontSize() - 2));
       ObjectSetString(0, objName, OBJPROP_FONT, FontName);
       ObjectSetInteger(0, objName, OBJPROP_ANCHOR, ANCHOR_CENTER);
    }
