@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2025"
 #property link      ""
-#property version   "2.60"
+#property version   "2.70"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots 0
@@ -78,6 +78,13 @@ int OnInit()
 {
    IndicatorSetString(INDICATOR_SHORTNAME, "Bar Counter Enhanced");
    DeleteAllObjects();
+   
+   // Set timer for 1-second updates if timers are enabled
+   if(ShowTimeUntilNextBar || ShowCurrentBarTimer)
+   {
+      EventSetTimer(1); // Update every second
+   }
+   
    return(INIT_SUCCEEDED);
 }
 
@@ -86,6 +93,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
+   EventKillTimer(); // Stop the timer
    DeleteAllObjects();
 }
 
@@ -303,6 +311,35 @@ void CreateWeekendHighlight(datetime barTime, double high, double low)
 }
 
 //+------------------------------------------------------------------+
+//| Timer event - updates countdown displays every second            |
+//+------------------------------------------------------------------+
+void OnTimer()
+{
+   // Update both timer displays
+   if(ShowTimeUntilNextBar)
+   {
+      DisplayTimeUntilNextBar();
+   }
+   
+   if(ShowCurrentBarTimer)
+   {
+      // Get current bar data for timer update
+      datetime time[];
+      double close[];
+      ArraySetAsSeries(time, true);
+      ArraySetAsSeries(close, true);
+      
+      if(CopyTime(_Symbol, PERIOD_CURRENT, 0, 1, time) > 0 &&
+         CopyClose(_Symbol, PERIOD_CURRENT, 0, 1, close) > 0)
+      {
+         DisplayCurrentBarTimer(time, close);
+      }
+   }
+   
+   ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
 //| Display timer on right side of current candle                    |
 //+------------------------------------------------------------------+
 void DisplayCurrentBarTimer(const datetime &time[], const double &close[])
@@ -325,14 +362,18 @@ void DisplayCurrentBarTimer(const datetime &time[], const double &close[])
    datetime currentBarTime = time[0];
    double currentPrice = close[0];
    
+   // Calculate position below the price line with offset
+   double offset = CalculateOffset();
+   double displayPrice = currentPrice - offset;
+   
    // Calculate position to the right of current candle
-   // Add time offset to place text to the right
-   datetime displayTime = currentBarTime + (period / 4); // Place 1/4 period to the right
+   // Add time offset to place text to the right (40% of the period)
+   datetime displayTime = currentBarTime + (period * 2 / 5); // Place 2/5 period to the right
    
    // Create or update timer display
    if(ObjectFind(0, objName) < 0)
    {
-      if(ObjectCreate(0, objName, OBJ_TEXT, 0, displayTime, currentPrice))
+      if(ObjectCreate(0, objName, OBJ_TEXT, 0, displayTime, displayPrice))
       {
          ObjectSetInteger(0, objName, OBJPROP_ANCHOR, ANCHOR_LEFT);
          ObjectSetString(0, objName, OBJPROP_FONT, FontName);
@@ -342,7 +383,7 @@ void DisplayCurrentBarTimer(const datetime &time[], const double &close[])
    {
       // Update position to follow current price and stay to the right
       ObjectSetInteger(0, objName, OBJPROP_TIME, displayTime);
-      ObjectSetDouble(0, objName, OBJPROP_PRICE, currentPrice);
+      ObjectSetDouble(0, objName, OBJPROP_PRICE, displayPrice);
    }
    
    // Update timer text and properties

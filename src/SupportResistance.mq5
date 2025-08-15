@@ -799,27 +799,41 @@ void CheckForBreaks(int index, const double &high[], const double &low[],
                {
                   levels[i].falseBreakCount++;
                   levels[i].isBroken = false; // Reset
-                  levels[i].strength = CalculateLevelStrength(levels[i]); // Recalculate
+                  levels[i].strength = CalculateLevelStrength(levels[i]); // Recalculate - stronger
                }
                else
                {
-                  // True break - flip to support
+                  // True break - but keep the level
                   if(isCleanBreak)
                   {
                      levels[i].cleanBreakCount++;
-                     levels[i].consecutiveFails = 0; // Reset fail counter
+                     levels[i].consecutiveFails++;
+                     
+                     // Only remove level if it has been cleanly broken multiple times
+                     if(levels[i].cleanBreakCount >= 3 && levels[i].bounceCount < 2)
+                     {
+                        // This level is too weak, mark for removal
+                        levels[i].strength = 0.1; // Very weak
+                        levels[i].isBroken = true;
+                     }
+                  }
+                  else
+                  {
+                     // Not a clean break, might flip
+                     levels[i].isResistance = false;  // Now becomes support
+                     levels[i].hasFlipped = true;
+                     levels[i].flipCount++;
+                     levels[i].consecutiveFails = 0; // Reset on flip
                   }
                   
-                  levels[i].isResistance = false;  // Now becomes support
-                  levels[i].hasFlipped = true;
-                  levels[i].flipCount++;
                   levels[i].strength = CalculateLevelStrength(levels[i]);
                   stats.totalBreaks++;
                   
                   // Alert
                   if(InpEnableAlerts && InpAlertBreaks)
                   {
-                     string msg = StringFormat("Resistance broken at %.5f - Now Support", level);
+                     string msg = StringFormat("Resistance tested at %.5f - Strength: %.0f%%", 
+                                             level, levels[i].strength * 100);
                      SendAlert(msg);
                   }
                }
@@ -831,22 +845,65 @@ void CheckForBreaks(int index, const double &high[], const double &low[],
          // Support level
          if(close[index] < level - breakBuffer && close[index + 1] >= level)
          {
-            // Check volume condition
-            if(!InpRequireVolumeForBreak || volumeOsc > InpVolumeThreshold)
+            // Determine break quality
+            bool isCleanBreak = (level - close[index]) > breakBuffer * 3; // Strong break
+            bool hasVolume = volumeOsc > InpVolumeThreshold;
+            
+            if(!InpRequireVolumeForBreak || hasVolume)
             {
-               // Support broken - flip to resistance
-               levels[i].isResistance = true;  // Now becomes resistance
-               levels[i].hasFlipped = true;
-               levels[i].flipCount++;
                levels[i].brokenTime = time[index];
-               levels[i].strength = MathMax(0.5, levels[i].strength * 0.8); // Reduce strength slightly
-               stats.totalBreaks++;
                
-               // Alert
-               if(InpEnableAlerts && InpAlertBreaks)
+               // Check if this becomes a false break
+               bool isFalseBreak = false;
+               for(int j = MathMax(0, index - 3); j < index; j++)
                {
-                  string msg = StringFormat("Support broken at %.5f - Now Resistance", level);
-                  SendAlert(msg);
+                  if(close[j] > level) // Price came back above
+                  {
+                     isFalseBreak = true;
+                     break;
+                  }
+               }
+               
+               if(isFalseBreak)
+               {
+                  levels[i].falseBreakCount++;
+                  levels[i].strength = CalculateLevelStrength(levels[i]); // Recalculate - stronger
+               }
+               else
+               {
+                  // True break - but keep the level
+                  if(isCleanBreak)
+                  {
+                     levels[i].cleanBreakCount++;
+                     levels[i].consecutiveFails++;
+                     
+                     // Only remove level if it has been cleanly broken multiple times
+                     if(levels[i].cleanBreakCount >= 3 && levels[i].bounceCount < 2)
+                     {
+                        // This level is too weak, mark for removal
+                        levels[i].strength = 0.1; // Very weak
+                        levels[i].isBroken = true;
+                     }
+                  }
+                  else
+                  {
+                     // Not a clean break, might flip
+                     levels[i].isResistance = true;  // Now becomes resistance
+                     levels[i].hasFlipped = true;
+                     levels[i].flipCount++;
+                     levels[i].consecutiveFails = 0; // Reset on flip
+                  }
+                  
+                  levels[i].strength = CalculateLevelStrength(levels[i]);
+                  stats.totalBreaks++;
+                  
+                  // Alert
+                  if(InpEnableAlerts && InpAlertBreaks)
+                  {
+                     string msg = StringFormat("Support tested at %.5f - Strength: %.0f%%", 
+                                             level, levels[i].strength * 100);
+                     SendAlert(msg);
+                  }
                }
             }
          }
@@ -1187,6 +1244,12 @@ void DrawLevelLabels()
    
    for(int i = 0; i < levelCount; i++)
    {
+      // Skip only truly broken levels (multiple clean breaks with no bounces)
+      if(levels[i].isBroken && levels[i].cleanBreakCount >= 3 && levels[i].bounceCount < 2)
+      {
+         continue; // Skip drawing this level - it's too weak
+      }
+      
       double price = levels[i].price;
       // Use behavior score for strength assessment
       double behaviorStrength = levels[i].behaviorScore / 100.0; // Convert to 0-1 range
