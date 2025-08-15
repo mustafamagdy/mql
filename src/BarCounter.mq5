@@ -124,10 +124,16 @@ int OnCalculate(const int rates_total,
       TimeToStruct(currentBarTime, currentBarDT);
       int currentBarNumber = currentBarDT.hour + 1;
       
-      string comment = "Bar Counter (Tester Mode)\n";
+      string comment = "═══════════════════════════════\n";
+      comment += "    BAR COUNTER (TESTER MODE)    \n";
+      comment += "═══════════════════════════════\n";
       comment += StringFormat("Current Bar: %s\n", TimeToString(currentBarTime, TIME_DATE|TIME_MINUTES));
-      comment += StringFormat("Bar Number: #%d\n", currentBarNumber);
+      comment += StringFormat("Bar Number: #%d of 24\n", currentBarNumber);
       comment += StringFormat("Day: %s\n", TimeToString(currentBarTime, TIME_DATE));
+      comment += "═══════════════════════════════\n";
+      comment += "Note: Visual objects not supported\n";
+      comment += "in MT5 Strategy Tester.\n";
+      comment += "Check Journal for bar details.\n";
       Comment(comment);
    }
    
