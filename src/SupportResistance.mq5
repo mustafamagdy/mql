@@ -12,19 +12,19 @@
 
 // Input parameters - Detection Settings
 input group "═══ Detection Settings ═══"
-input int      InpLeftBars = 5;                     // Left Bars for Pivot Detection
-input int      InpRightBars = 5;                    // Right Bars for Pivot Detection
-input int      InpMaxLookback = 500;                // Maximum Bars to Analyze
-input double   InpZoneMergeDistance = 0.0008;       // Zone Merge Distance (%)
-input int      InpMinTouches = 2;                   // Minimum Touches for Strong Level
-input double   InpZoneWidth = 0.0003;               // S/R Zone Width (%)
-input double   InpMaxDistanceFromPrice = 0.05;      // Max Distance from Current Price (5%)
-input int      InpMinPivotStrength = 2;             // Minimum Pivot Strength (1-15)
+input int      InpLeftBars = 7;                     // Left Bars for Pivot Detection (7 optimal for H1)
+input int      InpRightBars = 7;                    // Right Bars for Pivot Detection (7 optimal for H1)
+input int      InpMaxLookback = 400;                // Maximum Bars to Analyze (400 bars = ~16 days on H1)
+input double   InpZoneMergeDistance = 0.0012;       // Zone Merge Distance (12 pips - prevents duplicates)
+input int      InpMinTouches = 3;                   // Minimum Touches for Strong Level (3 = reliable)
+input double   InpZoneWidth = 0.0004;               // S/R Zone Width (4 pips zone thickness)
+input double   InpMaxDistanceFromPrice = 0.03;      // Max Distance from Current Price (3% = ~300 pips)
+input int      InpMinPivotStrength = 3;             // Minimum Pivot Strength (3 bars minimum)
 
 // Input parameters - Volume Settings
 input group "═══ Volume Analysis ═══"
 input bool     InpUseVolume = true;                 // Use Volume Filter
-input double   InpVolumeThreshold = 20.0;           // Volume Threshold (%)
+input double   InpVolumeThreshold = 25.0;           // Volume Threshold (25% = balanced filter)
 input int      InpVolumeEMAShort = 5;               // Volume EMA Short Period
 input int      InpVolumeEMALong = 10;               // Volume EMA Long Period
 
@@ -36,8 +36,8 @@ input ENUM_TIMEFRAMES InpHigherTF = PERIOD_H4;      // Higher Timeframe
 // Input parameters - Break Detection
 input group "═══ Break Detection ═══"
 input bool     InpShowBreaks = true;                // Show Break Signals
-input bool     InpRequireVolumeForBreak = true;     // Require Volume for Breaks
-input double   InpBreakBuffer = 0.0001;             // Break Buffer (%)
+input bool     InpRequireVolumeForBreak = true;     // Require Volume for Breaks (reduces false breaks)
+input double   InpBreakBuffer = 0.0003;             // Break Buffer (3 pips - accounts for spread)
 input bool     InpShowWicks = true;                 // Show Wick Rejections
 
 // Input parameters - Visual Settings
@@ -619,7 +619,8 @@ void ScanForPriceClusters(const double &high[], const double &low[], const doubl
       }
       
       // If we have enough touches OR strong bounces, add as a level
-      if(touches >= 2 || bounces >= 1)  // Lowered threshold for better detection
+      // Use InpMinTouches parameter for consistency
+      if(touches >= InpMinTouches || bounces >= 2)  // Use configured min touches
       {
          bool isResistance = (level > currentPrice);
          ProcessNewLevel(level, isResistance, lastTouch);

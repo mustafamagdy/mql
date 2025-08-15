@@ -1106,9 +1106,41 @@ int OnCalculate(const int rates_total,
             else if(legCount == 2)
             {
                bool strongSignal = true;
+               
+               // Al Brooks quality filters
+               bool passesFilters = true;
+               
+               // 1. Check if signal bar is a trend bar
+               if(!IsTrendBar(open[i], high[i], low[i], close[i], ATRBuffer[i]))
+                  passesFilters = false;
+               
+               // 2. Check strong close position
+               if(!HasStrongClose(open[i], high[i], low[i], close[i], false))
+                  passesFilters = false;
+               
+               // 3. Check EMA position
+               if(!CheckEMAPosition(close[i], PrimaryEMABuffer[i], false))
+                  passesFilters = false;
+               
+               // 4. Check consecutive trend bars before signal
+               if(i > 0)
+               {
+                  int consecBars = CountConsecutiveTrendBars(open, high, low, close, i-1, false, 5);
+                  if(consecBars < InpMinConsecutiveBars)
+                     passesFilters = false;
+               }
+               
+               // 5. With-trend only filter
+               if(InpWithTrendOnly)
+               {
+                  // For shorts, we want overall downtrend (lower lows)
+                  if(i > 20 && low[i] > low[ArrayMinimum(low, i-20, 20)])
+                     passesFilters = false;
+               }
+               
                if(InpStrongSignalsOnly)
                {
-                  // Check for strong signal criteria
+                  // Original strong signal criteria
                   double range = high[i] - low[i];
                   bool isBearish = close[i] < open[i];
                   bool closesLow = close[i] < (low[i] + range * 0.3);
@@ -1116,7 +1148,7 @@ int OnCalculate(const int rates_total,
                   strongSignal = isBearish && closesLow && lowerClose;
                }
                
-               if(InpShowL2 && waitForLegCompletion && strongSignal)
+               if(InpShowL2 && waitForLegCompletion && strongSignal && passesFilters)
                {
                   L2Buffer[i] = high[i];
                   SendSignalAlert("L2", i);
