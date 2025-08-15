@@ -11,13 +11,12 @@
 
 // Input parameters
 input int DisplayInterval = 1;        // Display count every X bars (1 = every bar)
-input color TextColor = clrRed;     // Text color for bar count
-input int TextSize = 10;              // Font size (6-20 recommended, default: 10)
-input string FontName = "Arial";      // Font name (Arial, Verdana, Times New Roman, etc.)
+input color TextColor = clrRed;       // Text color for bar count
+input int TextSize = 10;              // Font size (6-20 recommended)
+input string FontName = "Arial";      // Font name
 input int TextOffset = 5;             // Vertical offset below bars (in ticks, 0=auto)
 input bool VerticalText = true;       // Display text vertically (90 degrees rotation)
 input int MaxBarsToProcess = 500;     // Maximum bars to process (0 = all bars)
-input bool EnableDebugLog = false;    // Enable debug logging
 
 // Global variables
 string objPrefix = "BarCount_";
@@ -27,12 +26,8 @@ string objPrefix = "BarCount_";
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   // Set indicator name
-   IndicatorSetString(INDICATOR_SHORTNAME, "Bar Counter (Reset Daily)");
-   
-   // Clean up any existing objects
+   IndicatorSetString(INDICATOR_SHORTNAME, "Bar Counter");
    DeleteAllObjects();
-   
    return(INIT_SUCCEEDED);
 }
 
@@ -41,7 +36,6 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   // Clean up all objects created by this indicator
    DeleteAllObjects();
 }
 
@@ -59,258 +53,77 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
 {
-   // Set array series flags
+   // Set arrays as series
    ArraySetAsSeries(time, true);
-   ArraySetAsSeries(open, true);
-   ArraySetAsSeries(high, true);
    ArraySetAsSeries(low, true);
-   ArraySetAsSeries(close, true);
    
-   // Check if we need to update
-   bool needsUpdate = false;
-   bool inTester = MQLInfoInteger(MQL_TESTER);
+   // Skip if no bars
+   if(rates_total <= 0) return(0);
    
-   // In tester or first run, always clean and redraw
-   if(prev_calculated == 0 || inTester)
-   {
+   // Clear objects on first run
+   if(prev_calculated == 0)
       DeleteAllObjects();
-      needsUpdate = true;
-   }
-   // In live mode, optimize updates
-   else
-   {
-      static int lastProcessedBars = 0;
-      if(rates_total > lastProcessedBars)
-      {
-         needsUpdate = true;
-         lastProcessedBars = rates_total;
-      }
-      else
-      {
-         return(rates_total);
-      }
-   }
    
-   // Get current time from the latest bar (works in both live and tester)
-   datetime currentTime = (rates_total > 0) ? time[0] : TimeCurrent();
-   MqlDateTime currentDT;
-   TimeToStruct(currentTime, currentDT);
+   // Determine bars to process
+   int limit = MaxBarsToProcess > 0 ? MathMin(MaxBarsToProcess, rates_total) : rates_total;
    
-   // Get today's midnight based on the latest bar
-   MqlDateTime todayDT = currentDT;
-   todayDT.hour = 0;
-   todayDT.min = 0;
-   todayDT.sec = 0;
-   datetime todayMidnight = StructToTime(todayDT);
-   
-   if(EnableDebugLog && prev_calculated == 0)
-   {
-      Print("=== BAR COUNTER - Processing ", MaxBarsToProcess, " bars ===");
-      Print("Current time: ", TimeToString(currentTime, TIME_DATE|TIME_MINUTES));
-      if(MQLInfoInteger(MQL_TESTER))
-         Print("Running in Strategy Tester mode");
-   }
-   
-   // Count and display bars up to MaxBarsToProcess (default 500)
-   int barsToProcess = MaxBarsToProcess;
-   if(barsToProcess <= 0 || barsToProcess > rates_total)
-      barsToProcess = rates_total;
-   
-   // In tester mode, show current bar info in comment
-   if(inTester && rates_total > 1)
-   {
-      datetime currentBarTime = time[1]; // Use index 1 (last closed bar)
-      MqlDateTime currentBarDT;
-      TimeToStruct(currentBarTime, currentBarDT);
-      int currentBarNumber = currentBarDT.hour + 1;
-      
-      string comment = "═══════════════════════════════\n";
-      comment += "    BAR COUNTER (TESTER MODE)    \n";
-      comment += "═══════════════════════════════\n";
-      comment += StringFormat("Current Bar: %s\n", TimeToString(currentBarTime, TIME_DATE|TIME_MINUTES));
-      comment += StringFormat("Bar Number: #%d of 24\n", currentBarNumber);
-      comment += StringFormat("Day: %s\n", TimeToString(currentBarTime, TIME_DATE));
-      comment += "═══════════════════════════════\n";
-      comment += "Note: Visual objects not supported\n";
-      comment += "in MT5 Strategy Tester.\n";
-      comment += "Check Journal for bar details.\n";
-      Comment(comment);
-   }
-   
-   for(int i = 0; i < barsToProcess; i++)
+   // Process bars
+   for(int i = 1; i < limit; i++) // Skip current bar [0]
    {
       datetime barTime = time[i];
+      MqlDateTime dt;
+      TimeToStruct(barTime, dt);
       
-      // Skip current incomplete bar
-      if(i == 0)
-         continue;
-         
-      MqlDateTime barDT;
-      TimeToStruct(barTime, barDT);
+      // Calculate bar number (00:00 = 1, 01:00 = 2, etc.)
+      int barNumber = dt.hour + 1;
       
-      // Calculate bar number: hour + 1 (00:00 = 1, 01:00 = 2, etc.)
-      int barNumber = barDT.hour + 1;
-      
-      // In tester mode, print bar info for key bars (00:00 and every 6 hours)
-      if(inTester && (barDT.hour == 0 || barDT.hour % 6 == 0))
-      {
-         Print("Bar at ", TimeToString(barTime, TIME_DATE|TIME_MINUTES), " = Bar #", barNumber);
-      }
-      
-      if(EnableDebugLog && i < 30)
-      {
-         Print("Index [", i, "] = ", TimeToString(barTime, TIME_DATE|TIME_MINUTES), 
-               " (Hour: ", barDT.hour, ") -> Bar #", barNumber);
-      }
-      
-      // Display count if this bar meets the display interval criteria
+      // Display if interval matches
       if(barNumber % DisplayInterval == 0 || barNumber == 1)
       {
-         // Create text object name
-         string timeStr = TimeToString(barTime, TIME_DATE|TIME_MINUTES);
-         StringReplace(timeStr, ":", "");
-         StringReplace(timeStr, " ", "_");
-         StringReplace(timeStr, ".", "_");
-         string objName = objPrefix + timeStr;
+         string objName = objPrefix + TimeToString(barTime, TIME_DATE|TIME_MINUTES);
+         StringReplace(objName, ":", "");
+         StringReplace(objName, " ", "_");
+         StringReplace(objName, ".", "_");
          
-         // Check if object already exists with correct text
-         bool objectExists = (ObjectFind(0, objName) >= 0);
-         if(objectExists)
-         {
-            // Check if it already has the correct text
-            string existingText = ObjectGetString(0, objName, OBJPROP_TEXT);
-            if(existingText == IntegerToString(barNumber))
-            {
-               // Object already exists with correct text, skip
-               continue;
-            }
-            else
-            {
-               // Wrong text, delete and recreate
-               ObjectDelete(0, objName);
-               objectExists = false;
-            }
-         }
+         // Skip if already exists
+         if(ObjectFind(0, objName) >= 0)
+            continue;
          
-         // Create text object only if it doesn't exist
-         // Use explicit chart ID 0 for main chart
-         long chartID = 0;
-         if(!objectExists)
+         // Create text object
+         if(ObjectCreate(0, objName, OBJ_TEXT, 0, barTime, low[i]))
          {
-            // Create the object on the main chart window
-            if(!ObjectCreate(chartID, objName, OBJ_TEXT, 0, barTime, low[i]))
-            {
-               // If creation failed, try to delete first then recreate
-               ObjectDelete(chartID, objName);
-               if(!ObjectCreate(chartID, objName, OBJ_TEXT, 0, barTime, low[i]))
-               {
-                  if(EnableDebugLog)
-                     Print("Failed to create object: ", objName, " Error: ", GetLastError());
-                  continue;
-               }
-            }
-            
-            // Set text properties using explicit chart ID
-            ObjectSetString(chartID, objName, OBJPROP_TEXT, IntegerToString(barNumber));
-            ObjectSetInteger(chartID, objName, OBJPROP_COLOR, TextColor);
-            ObjectSetInteger(chartID, objName, OBJPROP_FONTSIZE, TextSize);
-            ObjectSetString(chartID, objName, OBJPROP_FONT, FontName);
-            ObjectSetInteger(chartID, objName, OBJPROP_ANCHOR, ANCHOR_CENTER);
-            
-            // Set text rotation if vertical text is enabled
-            if(VerticalText)
-            {
-               ObjectSetDouble(chartID, objName, OBJPROP_ANGLE, 90.0);
-            }
-            else
-            {
-               ObjectSetDouble(chartID, objName, OBJPROP_ANGLE, 0.0);
-            }
+            ObjectSetString(0, objName, OBJPROP_TEXT, IntegerToString(barNumber));
+            ObjectSetInteger(0, objName, OBJPROP_COLOR, TextColor);
+            ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, TextSize);
+            ObjectSetString(0, objName, OBJPROP_FONT, FontName);
+            ObjectSetInteger(0, objName, OBJPROP_ANCHOR, ANCHOR_CENTER);
+            ObjectSetDouble(0, objName, OBJPROP_ANGLE, VerticalText ? 90.0 : 0.0);
             
             // Calculate offset
-            double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-            double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+            double offset = TextOffset > 0 ? 
+                           TextOffset * SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE) :
+                           20 * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
             
-            double offset;
-            if(TextOffset > 0)
-            {
-               offset = TextOffset * tickSize;
-               if(offset == 0)
-                  offset = TextOffset * point * 10;
-            }
-            else
-            {
-               // Auto mode - simple fixed offset
-               offset = 20 * point;
-            }
-            
-            // Position text below the bar - USE EXACT BAR TIME
-            double textPrice = low[i] - offset;
-            
-            ObjectSetInteger(chartID, objName, OBJPROP_TIME, barTime);
-            ObjectSetDouble(chartID, objName, OBJPROP_PRICE, textPrice);
-            
-            // Make object visible in background
-            ObjectSetInteger(chartID, objName, OBJPROP_BACK, false);
-            ObjectSetInteger(chartID, objName, OBJPROP_SELECTABLE, false);
-            ObjectSetInteger(chartID, objName, OBJPROP_SELECTED, false);
+            ObjectSetDouble(0, objName, OBJPROP_PRICE, low[i] - offset);
          }
       }
    }
    
-   if(EnableDebugLog && prev_calculated == 0)
-   {
-      Print("=== END ===");
-   }
-   
-   // Always force redraw in tester mode or when we made updates
-   if(needsUpdate || inTester)
-   {
-      ChartRedraw(0);
-   }
-   
+   ChartRedraw();
    return(rates_total);
 }
-
 
 //+------------------------------------------------------------------+
 //| Delete all objects created by this indicator                    |
 //+------------------------------------------------------------------+
 void DeleteAllObjects()
 {
-   // Delete all objects with our prefix
-   int deleted = 0;
    int total = ObjectsTotal(0);
    for(int i = total - 1; i >= 0; i--)
    {
       string name = ObjectName(0, i);
       if(StringFind(name, objPrefix) == 0)
-      {
-         if(ObjectDelete(0, name))
-            deleted++;
-      }
-   }
-   
-   if(EnableDebugLog && deleted > 0)
-      Print("Deleted ", deleted, " old bar count objects");
-   
-   // Only redraw if we actually deleted something   
-   if(deleted > 0)
-      ChartRedraw();
-}
-
-//+------------------------------------------------------------------+
-//| Chart event handler                                             |
-//+------------------------------------------------------------------+
-void OnChartEvent(const int id,
-                  const long &lparam,
-                  const double &dparam,
-                  const string &sparam)
-{
-   // Handle chart changes to refresh display if needed
-   if(id == CHARTEVENT_CHART_CHANGE)
-   {
-      ChartRedraw();
+         ObjectDelete(0, name);
    }
 }
 //+------------------------------------------------------------------+
