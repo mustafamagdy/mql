@@ -729,11 +729,44 @@ void CheckForBreaks(int index, const double &high[], const double &low[],
    {
       double level = levels[i].price;
       double breakBuffer = level * InpBreakBuffer;
+      double proximityZone = level * 0.001; // 0.1% proximity check - only check behaviors if price is close
       
-      // First check for struggles and bounces
-      DetectStruggle(levels[i], index, high, low, close, time);
-      DetectBounce(levels[i], index, high, low, close, open);
-      CheckForRetest(levels[i], index, high, low, close, time);
+      // Only check for behaviors if price is actually near the level
+      bool priceNearLevel = false;
+      if(levels[i].isResistance)
+      {
+         // For resistance, check if high is near
+         priceNearLevel = (high[index] >= level - proximityZone * 3);
+      }
+      else
+      {
+         // For support, check if low is near
+         priceNearLevel = (low[index] <= level + proximityZone * 3);
+      }
+      
+      // Only run behavior detection if price is actually near the level
+      if(priceNearLevel)
+      {
+         // Store old behavior counts to check if anything changed
+         int oldStruggleCount = levels[i].struggleCount;
+         int oldBounceCount = levels[i].bounceCount;
+         int oldFalseBreakCount = levels[i].falseBreakCount;
+         int oldCleanBreakCount = levels[i].cleanBreakCount;
+         
+         // Run detection functions
+         DetectStruggle(levels[i], index, high, low, close, time);
+         DetectBounce(levels[i], index, high, low, close, open);
+         CheckForRetest(levels[i], index, high, low, close, time);
+         
+         // Only recalculate strength if behaviors actually changed
+         if(levels[i].struggleCount != oldStruggleCount ||
+            levels[i].bounceCount != oldBounceCount ||
+            levels[i].falseBreakCount != oldFalseBreakCount ||
+            levels[i].cleanBreakCount != oldCleanBreakCount)
+         {
+            levels[i].strength = CalculateLevelStrength(levels[i]);
+         }
+      }
       
       // Check for breaks and role reversals
       if(levels[i].isResistance)

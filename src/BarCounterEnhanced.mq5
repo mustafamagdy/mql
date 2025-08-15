@@ -41,7 +41,6 @@ input group "Milestone Settings"
 input bool EnableMilestones = true;           // Enable milestone markers
 input int MilestoneInterval = 5;              // Highlight every X bars (e.g., 5 = every 5th bar)
 input color MilestoneColor = clrLime;         // Milestone color
-input int MilestoneSize = 14;                 // Milestone text size
 
 // Input parameters - Weekend Handling
 input group "Weekend Settings"
@@ -264,7 +263,7 @@ void CreateCountText(string objName, datetime barTime, double price, int barNumb
    {
       ObjectSetString(0, objName, OBJPROP_TEXT, IntegerToString(barNumber));
       ObjectSetInteger(0, objName, OBJPROP_COLOR, isMilestone ? MilestoneColor : TextColor);
-      ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, isMilestone ? MilestoneSize : GetFontSize());
+      ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, GetFontSize());
       ObjectSetString(0, objName, OBJPROP_FONT, FontName);
       ObjectSetInteger(0, objName, OBJPROP_ANCHOR, ANCHOR_CENTER);
       ObjectSetDouble(0, objName, OBJPROP_ANGLE, VerticalText ? 90.0 : 0.0);

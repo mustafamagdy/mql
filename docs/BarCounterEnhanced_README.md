@@ -8,28 +8,18 @@ An advanced bar counting indicator for MetaTrader 5 with multiple display modes 
 - Display bar counts above the high or below the low of each bar
 - Configurable via `DisplayAboveBar` parameter
 
-### 2. **Background Highlighting**
-- Highlight specific bar ranges with customizable colors
-- Set start and end bar numbers for highlighting
-- Adjustable transparency for subtle visual effects
-
-### 3. **Time Until Next Bar**
+### 2. **Time Until Next Bar**
 - Real-time countdown showing remaining time for current bar
 - Displayed in the top-right corner
 - Format: HH:MM:SS or MM:SS depending on timeframe
 
-### 4. **Milestone Markers**
+### 3. **Milestone Markers**
 - Highlight every Nth bar (e.g., every 5th, 10th bar)
 - Single interval configuration for consistent highlighting
 - Only the counter text changes color and size
 - Perfect for identifying key bar positions
 
-### 5. **Average Bar Range**
-- Calculates and displays average range over specified period
-- Shows as "R:XXX" below the bar count
-- Helps identify volatility patterns
-
-### 6. **Skip Weekends**
+### 4. **Skip Weekends**
 - Option to exclude weekend bars from counting
 - Maintains continuous count across trading days
 - Optional weekend highlighting
@@ -56,16 +46,6 @@ An advanced bar counting indicator for MetaTrader 5 with multiple display modes 
 ### Enhanced Features
 - **ShowTimeUntilNextBar**: Enable countdown timer
 - **TimeRemainingColor**: Timer text color
-- **ShowAverageRange**: Display average range
-- **AvgRangePeriod**: Bars for range calculation
-- **AvgRangeColor**: Range text color
-
-### Bar Range Highlighting
-- **EnableBackgroundHighlight**: Enable range highlighting
-- **HighlightStart**: First bar to highlight
-- **HighlightEnd**: Last bar to highlight
-- **HighlightColor**: Background color
-- **HighlightAlpha**: Background transparency
 
 ### Milestone Settings
 - **EnableMilestones**: Enable special markers
@@ -86,13 +66,8 @@ An advanced bar counting indicator for MetaTrader 5 with multiple display modes 
 - Enable milestones for key bar numbers
 
 ### Session Trading
-- Set `HighlightStart = 1` and `HighlightEnd = 8` for Asian session
 - Set `MilestoneInterval = 5` to highlight every 5th bar
 - Use `ShowTimeUntilNextBar` for bar close timing
-
-### Range Analysis
-- Enable `ShowAverageRange` with period of 20
-- Use background highlighting for high-volatility zones
 - Skip weekends for accurate daily counts
 
 ## Performance Notes
@@ -103,6 +78,7 @@ An advanced bar counting indicator for MetaTrader 5 with multiple display modes 
 
 ## Version History
 
+- **v2.4** - Removed bar range highlighting and average range calculation for cleaner display
 - **v2.3** - Simplified milestone system with single interval configuration
 - **v2.2** - Fixed bar counting to count actual candles instead of hours (works on all timeframes)
 - **v2.1** - Added font size presets (Small/Medium/Large/Custom), removed box display
