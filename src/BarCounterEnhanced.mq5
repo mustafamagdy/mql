@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2025"
 #property link      ""
-#property version   "2.50"
+#property version   "2.40"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots 0
