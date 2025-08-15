@@ -9,14 +9,16 @@ An advanced bar counting indicator for MetaTrader 5 with multiple display modes 
 - Configurable via `DisplayAboveBar` parameter
 
 ### 2. **Time Until Next Bar**
-- Real-time countdown showing remaining time for current bar
-- Displayed in the top-right corner
+- **Corner Display**: Real-time countdown in top-right corner
+- **Current Bar Timer**: Countdown timer displayed under the current candle
+- Updates in real-time showing time remaining
 - Format: HH:MM:SS or MM:SS depending on timeframe
+- Separate color settings for each timer
 
 ### 3. **Milestone Markers**
 - Highlight every Nth bar (e.g., every 5th, 10th bar)
 - Single interval configuration for consistent highlighting
-- Only the counter text changes color and size
+- Only the counter text color changes (same font size)
 - Perfect for identifying key bar positions
 
 ### 4. **Skip Weekends**
@@ -44,14 +46,16 @@ An advanced bar counting indicator for MetaTrader 5 with multiple display modes 
 - **MaxBarsToProcess**: Limit processing for performance
 
 ### Enhanced Features
-- **ShowTimeUntilNextBar**: Enable countdown timer
-- **TimeRemainingColor**: Timer text color
+- **ShowTimeUntilNextBar**: Enable countdown timer in corner
+- **TimeRemainingColor**: Corner timer text color
+- **ShowCurrentBarTimer**: Enable timer under current candle
+- **CurrentBarTimerColor**: Current bar timer color
+- **TimerFontSize**: Font size for current bar timer
 
 ### Milestone Settings
 - **EnableMilestones**: Enable special markers
 - **MilestoneInterval**: Highlight every X bars (e.g., 5 = every 5th bar)
 - **MilestoneColor**: Color for milestone bars
-- **MilestoneSize**: Text size for milestones
 
 ### Weekend Settings
 - **SkipWeekends**: Exclude weekend bars from count
@@ -78,6 +82,8 @@ An advanced bar counting indicator for MetaTrader 5 with multiple display modes 
 
 ## Version History
 
+- **v2.6** - Added timer under current candle showing countdown to bar close
+- **v2.5** - Milestone markers now use same font size as regular bar counts (only color changes)
 - **v2.4** - Removed bar range highlighting and average range calculation for cleaner display
 - **v2.3** - Simplified milestone system with single interval configuration
 - **v2.2** - Fixed bar counting to count actual candles instead of hours (works on all timeframes)

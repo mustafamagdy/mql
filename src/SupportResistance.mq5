@@ -450,6 +450,19 @@ void ProcessNewLevel(double price, bool isResistance, datetime time)
       levels[levelCount].hasFlipped = false;
       levels[levelCount].flipCount = 0;
       levels[levelCount].retestCount = 0;
+      
+      // Initialize behavior tracking to 0
+      levels[levelCount].struggleCount = 0;
+      levels[levelCount].cleanBreakCount = 0;
+      levels[levelCount].falseBreakCount = 0;
+      levels[levelCount].bounceCount = 0;
+      levels[levelCount].avgHoldTime = 0;
+      levels[levelCount].lastStruggle = 0;
+      levels[levelCount].wasRetested = false;
+      levels[levelCount].retestQuality = 0;
+      levels[levelCount].consecutiveFails = 0;
+      levels[levelCount].behaviorScore = 50; // Start with neutral score
+      
       levelCount++;
       
       // Alert for new level
@@ -530,53 +543,41 @@ bool DetectStruggle(SRLevel &level, int index, const double &high[], const doubl
                    const double &close[], const datetime &time[])
 {
    double levelZone = level.price * InpZoneWidth;
-   int touchCount = 0;
-   double priceRange = 0;
+   bool touched = false;
+   bool isRejection = false;
    
-   // Look at last 5-10 bars for actual touches and struggle behavior
-   for(int i = index; i < MathMin(index + 10, ArraySize(high)); i++)
+   // Only check the CURRENT bar for touch (not a window of bars)
+   if(level.isResistance)
    {
-      bool touched = false;
-      
-      // Check for actual touch based on level type
-      if(level.isResistance)
+      // Resistance: high must reach or exceed the level
+      if(high[index] >= level.price - levelZone && high[index] <= level.price + levelZone)
       {
-         // Resistance: high must reach or exceed the level
-         if(high[i] >= level.price - levelZone && high[i] <= level.price + levelZone)
-         {
-            touched = true;
-         }
-      }
-      else
-      {
-         // Support: low must reach or go below the level
-         if(low[i] <= level.price + levelZone && low[i] >= level.price - levelZone)
-         {
-            touched = true;
-         }
-      }
-      
-      if(touched)
-      {
-         touchCount++;
-         priceRange += (high[i] - low[i]);
+         touched = true;
          
-         // Check if price failed to break through (wick rejection)
-         if(level.isResistance && close[i] < level.price)
+         // Check if it's a rejection (touched but closed below)
+         if(close[index] < level.price - levelZone)
          {
-            // Touched resistance but closed below = rejection
-            touchCount++; // Extra weight for rejection
+            isRejection = true;
          }
-         else if(!level.isResistance && close[i] > level.price)
+      }
+   }
+   else
+   {
+      // Support: low must reach or go below the level
+      if(low[index] <= level.price + levelZone && low[index] >= level.price - levelZone)
+      {
+         touched = true;
+         
+         // Check if it's a rejection (touched but closed above)
+         if(close[index] > level.price + levelZone)
          {
-            // Touched support but closed above = rejection
-            touchCount++; // Extra weight for rejection
+            isRejection = true;
          }
       }
    }
    
-   // Struggle = multiple actual touches with rejections
-   if(touchCount >= 3)
+   // Only increment struggle count if this bar actually touched and struggled
+   if(touched && isRejection)
    {
       level.struggleCount++;
       level.lastStruggle = time[index];
@@ -896,26 +897,32 @@ void ScanForPriceClusters(const double &high[], const double &low[], const doubl
       int bounces = 0;
       datetime lastTouch = 0;
       
-      // Count how many times price touched this level
+      // Count how many times price touched this level (only count actual touches)
       for(int i = 0; i < scanBars; i++)
       {
+         bool touchedThisBar = false;
+         
          // Check if high touched this level (potential resistance)
-         if(MathAbs(high[i] - level) < priceStep * 1.5)
+         if(high[i] >= level - priceStep * 0.5 && high[i] <= level + priceStep * 0.5)
          {
-            touches++;
+            touchedThisBar = true;
             // Check if price bounced down from this level
             if(i > 0 && close[i] < level && close[i-1] > close[i])
                bounces++;
-            if(time[i] > lastTouch)
-               lastTouch = time[i];
          }
          // Check if low touched this level (potential support)
-         else if(MathAbs(low[i] - level) < priceStep * 1.5)
+         else if(low[i] <= level + priceStep * 0.5 && low[i] >= level - priceStep * 0.5)
          {
-            touches++;
+            touchedThisBar = true;
             // Check if price bounced up from this level
             if(i > 0 && close[i] > level && close[i-1] < close[i])
                bounces++;
+         }
+         
+         // Only count one touch per bar
+         if(touchedThisBar)
+         {
+            touches++;
             if(time[i] > lastTouch)
                lastTouch = time[i];
          }

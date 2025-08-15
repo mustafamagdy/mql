@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2025"
 #property link      ""
-#property version   "2.40"
+#property version   "2.60"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots 0
@@ -33,8 +33,11 @@ input int MaxBarsToProcess = 500;             // Maximum bars to process (0 = al
 
 // Input parameters - Enhanced Features
 input group "Enhanced Features"
-input bool ShowTimeUntilNextBar = true;       // Show time remaining for current bar
-input color TimeRemainingColor = clrYellow;   // Color for time remaining display
+input bool ShowTimeUntilNextBar = true;       // Show time remaining in corner
+input color TimeRemainingColor = clrYellow;   // Color for corner time display
+input bool ShowCurrentBarTimer = true;        // Show timer on right side of current candle
+input color CurrentBarTimerColor = clrDarkOrange;   // Color for current bar timer
+input int TimerFontSize = 10;                 // Timer font size
 
 // Input parameters - Milestone Markers
 input group "Milestone Settings"
@@ -117,10 +120,16 @@ int OnCalculate(const int rates_total,
       barCounter = 0;
    }
    
-   // Show time until next bar for current bar
+   // Show time until next bar in corner
    if(ShowTimeUntilNextBar)
    {
       DisplayTimeUntilNextBar();
+   }
+   
+   // Show timer on right side of current candle
+   if(ShowCurrentBarTimer)
+   {
+      DisplayCurrentBarTimer(time, close);
    }
    
    // Determine bars to process
@@ -294,7 +303,56 @@ void CreateWeekendHighlight(datetime barTime, double high, double low)
 }
 
 //+------------------------------------------------------------------+
-//| Display time until next bar                                      |
+//| Display timer on right side of current candle                    |
+//+------------------------------------------------------------------+
+void DisplayCurrentBarTimer(const datetime &time[], const double &close[])
+{
+   string objName = objPrefix + "CurrentBarTimer";
+   
+   // Get current time and period
+   datetime currentTime = TimeCurrent();
+   int period = PeriodSeconds(PERIOD_CURRENT);
+   
+   // Calculate time until next bar
+   datetime barStartTime = (currentTime / period) * period;
+   datetime nextBarTime = barStartTime + period;
+   int secondsRemaining = (int)(nextBarTime - currentTime);
+   
+   // Format time display
+   string timeDisplay = FormatTimeRemaining(secondsRemaining);
+   
+   // Get current bar position and price (index 0)
+   datetime currentBarTime = time[0];
+   double currentPrice = close[0];
+   
+   // Calculate position to the right of current candle
+   // Add time offset to place text to the right
+   datetime displayTime = currentBarTime + (period / 4); // Place 1/4 period to the right
+   
+   // Create or update timer display
+   if(ObjectFind(0, objName) < 0)
+   {
+      if(ObjectCreate(0, objName, OBJ_TEXT, 0, displayTime, currentPrice))
+      {
+         ObjectSetInteger(0, objName, OBJPROP_ANCHOR, ANCHOR_LEFT);
+         ObjectSetString(0, objName, OBJPROP_FONT, FontName);
+      }
+   }
+   else
+   {
+      // Update position to follow current price and stay to the right
+      ObjectSetInteger(0, objName, OBJPROP_TIME, displayTime);
+      ObjectSetDouble(0, objName, OBJPROP_PRICE, currentPrice);
+   }
+   
+   // Update timer text and properties
+   ObjectSetString(0, objName, OBJPROP_TEXT, timeDisplay);
+   ObjectSetInteger(0, objName, OBJPROP_COLOR, CurrentBarTimerColor);
+   ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, TimerFontSize);
+}
+
+//+------------------------------------------------------------------+
+//| Display time until next bar in corner                            |
 //+------------------------------------------------------------------+
 void DisplayTimeUntilNextBar()
 {
