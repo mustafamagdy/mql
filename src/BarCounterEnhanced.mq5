@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2025"
 #property link      ""
-#property version   "2.70"
+#property version   "2.60"
 #property indicator_chart_window
 #property indicator_buffers 0
 #property indicator_plots 0
@@ -33,8 +33,6 @@ input int MaxBarsToProcess = 500;             // Maximum bars to process (0 = al
 
 // Input parameters - Enhanced Features
 input group "Enhanced Features"
-input bool ShowTimeUntilNextBar = true;       // Show time remaining in corner
-input color TimeRemainingColor = clrYellow;   // Color for corner time display
 input bool ShowCurrentBarTimer = true;        // Show timer on right side of current candle
 input color CurrentBarTimerColor = clrDarkOrange;   // Color for current bar timer
 input int TimerFontSize = 10;                 // Timer font size
@@ -79,8 +77,8 @@ int OnInit()
    IndicatorSetString(INDICATOR_SHORTNAME, "Bar Counter Enhanced");
    DeleteAllObjects();
    
-   // Set timer for 1-second updates if timers are enabled
-   if(ShowTimeUntilNextBar || ShowCurrentBarTimer)
+   // Set timer for 1-second updates if timer is enabled
+   if(ShowCurrentBarTimer)
    {
       EventSetTimer(1); // Update every second
    }
@@ -126,12 +124,6 @@ int OnCalculate(const int rates_total,
    {
       DeleteAllObjects();
       barCounter = 0;
-   }
-   
-   // Show time until next bar in corner
-   if(ShowTimeUntilNextBar)
-   {
-      DisplayTimeUntilNextBar();
    }
    
    // Show timer on right side of current candle
@@ -311,16 +303,11 @@ void CreateWeekendHighlight(datetime barTime, double high, double low)
 }
 
 //+------------------------------------------------------------------+
-//| Timer event - updates countdown displays every second            |
+//| Timer event - updates countdown display every second             |
 //+------------------------------------------------------------------+
 void OnTimer()
 {
-   // Update both timer displays
-   if(ShowTimeUntilNextBar)
-   {
-      DisplayTimeUntilNextBar();
-   }
-   
+   // Update timer display
    if(ShowCurrentBarTimer)
    {
       // Get current bar data for timer update
@@ -390,40 +377,6 @@ void DisplayCurrentBarTimer(const datetime &time[], const double &close[])
    ObjectSetString(0, objName, OBJPROP_TEXT, timeDisplay);
    ObjectSetInteger(0, objName, OBJPROP_COLOR, CurrentBarTimerColor);
    ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, TimerFontSize);
-}
-
-//+------------------------------------------------------------------+
-//| Display time until next bar in corner                            |
-//+------------------------------------------------------------------+
-void DisplayTimeUntilNextBar()
-{
-   string objName = objPrefix + "TimeRemaining";
-   
-   // Get current time and period
-   datetime currentTime = TimeCurrent();
-   int period = PeriodSeconds(PERIOD_CURRENT);
-   
-   // Calculate time until next bar
-   datetime barStartTime = (currentTime / period) * period;
-   datetime nextBarTime = barStartTime + period;
-   int secondsRemaining = (int)(nextBarTime - currentTime);
-   
-   // Format time display
-   string timeDisplay = FormatTimeRemaining(secondsRemaining);
-   
-   // Create or update display
-   if(ObjectFind(0, objName) < 0)
-   {
-      ObjectCreate(0, objName, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, objName, OBJPROP_CORNER, CORNER_RIGHT_UPPER);
-      ObjectSetInteger(0, objName, OBJPROP_XDISTANCE, 10);
-      ObjectSetInteger(0, objName, OBJPROP_YDISTANCE, 30);
-   }
-   
-   ObjectSetString(0, objName, OBJPROP_TEXT, "Next Bar: " + timeDisplay);
-   ObjectSetInteger(0, objName, OBJPROP_COLOR, TimeRemainingColor);
-   ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, 10);
-   ObjectSetString(0, objName, OBJPROP_FONT, "Arial");
 }
 
 //+------------------------------------------------------------------+

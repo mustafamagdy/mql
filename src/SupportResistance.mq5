@@ -197,8 +197,17 @@ int OnCalculate(const int rates_total,
    // First pass: Find ALL local highs and lows with minimal requirements
    int scanLimit = MathMin(InpMaxLookback, rates_total - 1);
    
-   // Scan for swing points - Start from most recent and work backwards
-   for(int i = 3; i < scanLimit - 3; i++)  // Start at bar 3 to have room for checking
+   // Only scan for new levels periodically or on first run
+   static datetime lastFullScan = 0;
+   bool needFullScan = (prev_calculated == 0) || 
+                       (TimeCurrent() - lastFullScan > PeriodSeconds() * 20); // Every 20 bars
+   
+   if(needFullScan)
+   {
+      lastFullScan = TimeCurrent();
+      
+      // Scan for swing points - Start from most recent and work backwards
+      for(int i = 3; i < scanLimit - 3; i++)  // Start at bar 3 to have room for checking
    {
       // Simple swing high detection - minimum 3 bars each side
       bool isSwingHigh = true;
@@ -273,8 +282,9 @@ int OnCalculate(const int rates_total,
    
    // Second pass: Find price clusters in recent action
    ScanForPriceClusters(high, low, close, time, currentPrice);
+   } // End of needFullScan block
    
-   // Check for level breaks and role reversals
+   // ALWAYS check for level breaks and role reversals on every tick
    for(int i = 1; i < MathMin(100, rates_total); i++)
    {
       CheckForBreaks(i, high, low, close, open, time);
